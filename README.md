@@ -15,6 +15,14 @@ nix run github:thekorn/har-viewer -- /path/to/capture.har
 nix run github:thekorn/har-viewer -- --sample
 ```
 
+The repository is currently private. The `github:` shorthand needs Nix's own
+GitHub authentication while it stays private. With an existing authenticated Git
+credential helper, use this form instead (no token in the command or URL):
+
+```sh
+nix run 'git+https://github.com/thekorn/har-viewer?ref=main' -- --sample
+```
+
 Linux packages are provided for x86_64 and aarch64. x86_64 is the tested target;
 aarch64 uses the same derivation but has not been validated on hardware. macOS and
 Windows are not supported in this iteration.

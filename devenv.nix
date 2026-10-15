@@ -6,6 +6,7 @@ in
   packages =
     libraries
     ++ (with pkgs; [
+      git
       cargo
       rustc
       rustfmt
