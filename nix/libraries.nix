@@ -7,8 +7,8 @@ with pkgs;
   wayland
   vulkan-loader
   libGL
-  xorg.libX11
-  xorg.libxcb
+  libx11
+  libxcb
   openssl
   zstd
 ]

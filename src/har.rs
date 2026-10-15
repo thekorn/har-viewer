@@ -86,7 +86,7 @@ fn span<'a>(entries: impl Iterator<Item = &'a Entry>) -> (f64, f64) {
 
 impl Capture {
     pub fn parse(input: &str) -> Result<Self, String> {
-        let original: Value =
+        let mut original: Value =
             serde_json::from_str(input).map_err(|e| format!("Invalid HAR JSON: {e}"))?;
         if !original.is_object() {
             return Err("HAR root must be an object".into());
@@ -243,6 +243,14 @@ impl Capture {
             }
             entries.push(e);
         }
+        // Entries own the original request/response JSON. Keep only capture metadata
+        // here so bodies aren't retained twice in memory or cloned twice on export.
+        let metadata = if wrapped {
+            &mut original["log"]
+        } else {
+            &mut original
+        };
+        metadata["entries"] = Value::Array(Vec::new());
         Ok(Self {
             entries,
             warnings,

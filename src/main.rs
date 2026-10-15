@@ -1,21 +1,73 @@
-use gpui::{App, Application, Context, Window, WindowOptions, div, prelude::*, rgb};
+mod app;
+mod input;
 
-struct Viewer;
-
-impl Render for Viewer {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .bg(rgb(0x111114))
-            .text_color(rgb(0xeeeeee))
-            .child("HAR Viewer")
-    }
-}
+use gpui::{
+    App, Application, Bounds, Focusable, TitlebarOptions, WindowBounds, WindowOptions, prelude::*,
+    px, size,
+};
 
 fn main() {
-    Application::new().run(|cx: &mut App| {
-        cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Viewer))
-            .expect("Could not open a desktop window");
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--help" || a == "-h") {
+        println!(
+            "HAR Viewer\n\nUsage: har-viewer [capture.har | --sample]\n\nPrivate native HAR inspector. Requires an X11 or Wayland desktop with Vulkan.\nCtrl O: open file · Ctrl F: search · Up/Down: navigate · Ctrl Q: quit"
+        );
+        return;
+    }
+    if args.len() > 1
+        || args
+            .first()
+            .is_some_and(|a| a.to_string_lossy().starts_with('-') && a != "--sample")
+    {
+        eprintln!("Usage: har-viewer [capture.har | --sample]");
+        std::process::exit(2);
+    }
+    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        eprintln!("HAR Viewer needs an X11 or Wayland desktop. Run it from your desktop session.");
+        std::process::exit(1);
+    }
+    Application::new().run(move |cx: &mut App| {
+        app::init(cx);
+        cx.on_window_closed(|cx| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
+        let bounds = Bounds::centered(None, size(px(1440.), px(900.)), cx);
+        let result = cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                window_min_size: Some(size(px(1100.), px(650.))),
+                titlebar: Some(TitlebarOptions {
+                    title: Some("HAR Viewer".into()),
+                    ..Default::default()
+                }),
+                app_id: Some("dev.thekorn.har-viewer".into()),
+                ..Default::default()
+            },
+            |window, cx| {
+                let view = cx.new(|cx| {
+                    let mut viewer = app::Viewer::new(cx);
+                    if let Some(arg) = args.first() {
+                        if arg == "--sample" {
+                            viewer.sample(cx);
+                        } else {
+                            viewer.load(arg.into(), cx);
+                        }
+                    }
+                    viewer
+                });
+                window.focus(&view.focus_handle(cx));
+                view
+            },
+        );
+        if let Err(error) = result {
+            eprintln!(
+                "Could not open HAR Viewer: {error}. Check your desktop session and Vulkan driver."
+            );
+            cx.quit();
+        }
         cx.activate(true);
     });
 }
