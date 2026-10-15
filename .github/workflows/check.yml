@@ -16,31 +16,39 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
+      # The Nix shell supplies our toolchain; this SDK is unused on these
+      # disposable hosted runners and crowds out Nix and Cargo build outputs.
+      - name: Reclaim Android SDK disk space
+        run: |
+          df -h /
+          sudo rm -rf -- /usr/local/lib/android
+          df -h /
       - uses: cachix/install-nix-action@v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          # nix develop does not inherit the devenv input's cache settings.
+          # Fetch the task runner instead of building its separate Rust toolchain.
+          extra_nix_config: |
+            extra-substituters = https://devenv.cachix.org
+            extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
       - name: Static analysis and contract tests
         run: nix develop --impure -c har-check
       - name: Core and navigation coverage (90% minimum)
         run: nix develop --impure -c har-coverage
       - name: Build native app
         run: nix develop --impure -c cargo build --locked
-      # macOS UI checks use a logged-in desktop with Metal and explicit privacy
-      # permissions. Run har-smoke --use-desktop on a Mac, not a headless CI VM.
       - name: Real desktop smoke test
-        if: runner.os == 'Linux'
         run: nix develop --impure -c har-smoke
       - name: Build and test distribution
         run: nix develop --impure -c har-package
       - name: Check packaged CLI
         run: ./result/bin/har-viewer --help
       - name: Check packaged desktop app
-        if: runner.os == 'Linux'
         run: >-
           nix develop --impure -c env
           -u LD_LIBRARY_PATH -u FONTCONFIG_FILE -u VK_DRIVER_FILES

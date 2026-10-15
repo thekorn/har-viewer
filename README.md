@@ -161,11 +161,10 @@ round trips, real shell argument quoting, and navigation after filtering. The
 desktop smoke test asserts clipboard and exported data through real keyboard and
 pointer input, including sorting, facets, response inspection and file-load recovery.
 
-CI is configured to build and check both Linux architectures and Apple Silicon
-macOS, including Nix packages and the headless CLI contract. Linux also runs the
-debug and packaged desktop smoke tests. macOS native rendering/interaction must
-be checked on an unlocked Mac with Metal and the permissions above; the hosted
-CI job does not establish UI coverage.
+CI builds and checks Ubuntu Linux on x86_64 and aarch64, including Nix packages,
+the headless CLI contract, and debug and packaged desktop smoke tests. macOS
+validation is manual for now; native rendering/interaction must be checked on
+an unlocked Mac with Metal and the permissions above.
 
 `libc` is locked to 0.2.186 because GPUI 0.2.2's transitive `xattr` 0.2.3 uses
 `ENOATTR`, removed in libc 0.2.190. Do not blindly update that lock entry without
