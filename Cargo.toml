@@ -1,0 +1,39 @@
+[package]
+name = "har-viewer"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A private, native HAR inspector built with GPUI"
+repository = "https://github.com/thekorn/har-viewer"
+
+[features]
+default = ["desktop"]
+desktop = ["dep:gpui", "dep:unicode-segmentation"]
+
+[[bin]]
+name = "har-viewer"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[dependencies]
+gpui = { version = "=0.2.2", optional = true, default-features = false, features = ["x11", "wayland"] }
+serde_json = "1"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+url = "2"
+unicode-segmentation = { version = "1", optional = true }
+
+[profile.dev]
+debug = 0
+
+[profile.test]
+debug = 0
+
+[profile.release]
+strip = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"

@@ -1,0 +1,6 @@
+/target/
+/.devenv/
+/.direnv/
+/.amp/
+/result
+/result-*
