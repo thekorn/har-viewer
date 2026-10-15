@@ -3,7 +3,7 @@ name = "har-viewer"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "A private, native HAR inspector built with GPUI"
+description = "A native HAR inspector built with GPUI"
 repository = "https://github.com/thekorn/har-viewer"
 
 [features]

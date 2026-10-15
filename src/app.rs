@@ -1226,7 +1226,7 @@ impl Viewer {
                 div()
                     .text_size(px(11.))
                     .text_color(rgb(ACCENT))
-                    .child("NATIVE. PRIVATE. FAST."),
+                    .child("NATIVE. FAST."),
             )
             .child(
                 div()

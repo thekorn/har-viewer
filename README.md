@@ -4,7 +4,7 @@
 
 # HAR Viewer
 
-A private, native HTTP archive inspector built with **Rust and GPUI**, with a compact dark
+A native HTTP archive inspector built with **Rust and GPUI**, with a compact dark
 workspace, faceted filters and a request inspector. This is a native application,
 not a browser wrapper.
 
@@ -22,14 +22,6 @@ nix run github:thekorn/har-viewer -- --sample
 spaces. File paths on the command line require `--input`; positional paths are not
 accepted. Run without arguments to start without a capture, or use `--sample` for
 the bundled fixture. `--input` and `--sample` are mutually exclusive.
-
-The repository is currently private. The `github:` shorthand needs Nix's own
-GitHub authentication while it stays private. With an existing authenticated Git
-credential helper, use this form instead (no token in the command or URL):
-
-```sh
-nix run 'git+https://github.com/thekorn/har-viewer?ref=main' -- --sample
-```
 
 Packages and development shells are provided for Linux (x86_64 and aarch64) and
 Apple Silicon macOS (aarch64). macOS uses native Cocoa windows and Metal; it does
