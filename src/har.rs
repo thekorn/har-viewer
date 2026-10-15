@@ -84,10 +84,87 @@ fn span<'a>(entries: impl Iterator<Item = &'a Entry>) -> (f64, f64) {
     }
 }
 
+fn unicode_escape(bytes: &[u8]) -> Option<u16> {
+    bytes
+        .strip_prefix(b"\\u")?
+        .get(..4)?
+        .iter()
+        .try_fold(0, |value, &digit| {
+            Some(value * 16 + (digit as char).to_digit(16)? as u16)
+        })
+}
+
+/// JavaScript can emit unpaired UTF-16 surrogates, but Rust strings cannot hold
+/// them. Retry with replacements in values only; serde_json still validates all
+/// syntax. Never replace keys, since distinct keys could collapse to the same one.
+fn parse_json(input: &str) -> Result<(Value, usize), String> {
+    let error = match serde_json::from_str(input) {
+        Ok(value) => return Ok((value, 0)),
+        Err(error) => error,
+    };
+    let bytes = input.as_bytes();
+    let mut normalized = String::new();
+    let mut replacements = 0;
+    let mut copied = 0;
+    let mut in_string = false;
+    let mut changed_string = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' if !in_string => {
+                in_string = true;
+                changed_string = false;
+                i += 1;
+            }
+            b'"' => {
+                if changed_string
+                    && bytes[i + 1..].iter().find(|b| !b.is_ascii_whitespace()) == Some(&b':')
+                {
+                    return Err("Invalid HAR JSON: unpaired UTF-16 surrogate in an object key; refusing replacement because distinct keys could merge".into());
+                }
+                in_string = false;
+                i += 1;
+            }
+            b'\\' if in_string => {
+                if let Some(code) = unicode_escape(&bytes[i..]) {
+                    if (0xd800..=0xdbff).contains(&code)
+                        && unicode_escape(&bytes[i + 6..])
+                            .is_some_and(|next| (0xdc00..=0xdfff).contains(&next))
+                    {
+                        i += 12;
+                        continue;
+                    }
+                    if (0xd800..=0xdfff).contains(&code) {
+                        normalized.push_str(&input[copied..i]);
+                        // Keep the byte width unchanged so JSON error locations
+                        // still refer to the original input.
+                        normalized.push_str("\\ufffd");
+                        copied = i + 6;
+                        replacements += 1;
+                        changed_string = true;
+                    }
+                    i += 6;
+                } else {
+                    // Consume escaped quotes/backslashes together. In particular,
+                    // a literal backslash followed by uD800 is not a surrogate.
+                    i += 2;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    if replacements == 0 {
+        return Err(format!("Invalid HAR JSON: {error}"));
+    }
+    normalized.push_str(&input[copied..]);
+    serde_json::from_str(&normalized)
+        .map(|value| (value, replacements))
+        .map_err(|e| format!("Invalid HAR JSON: {e}"))
+}
+
 impl Capture {
     pub fn parse(input: &str) -> Result<Self, String> {
-        let mut original: Value =
-            serde_json::from_str(input).map_err(|e| format!("Invalid HAR JSON: {e}"))?;
+        let (mut original, replacements) = parse_json(input)?;
         if !original.is_object() {
             return Err("HAR root must be an object".into());
         }
@@ -99,6 +176,11 @@ impl Capture {
             .ok_or("HAR log must contain an entries array")?;
         let mut entries = Vec::with_capacity(raws.len());
         let mut warnings = Vec::new();
+        if replacements > 0 {
+            warnings.push(format!(
+                "Replaced {replacements} unpaired UTF-16 surrogate escapes with �. Displayed values, clipboard copies and exports contain replacements, not the original code units. The source file is unchanged."
+            ));
+        }
         for (id, raw) in raws.iter().enumerate() {
             if !raw.is_object() {
                 warnings.push(format!("Entry {id}: expected an object; skipped"));

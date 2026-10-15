@@ -85,8 +85,14 @@ Use **Command (⌘)** instead of **Ctrl** on macOS. In-app hints follow the plat
 
 ### Deliberate limits
 
-Files are limited to 256 MiB. Body previews show at most 5,000 lines, 2,000 characters
-per line; **Copy content** retains the full value. Inspector source scrolls horizontally.
+Files are limited to 1 GiB (1,073,741,824 bytes). Body previews show at most 5,000
+lines, 2,000 characters per line; **Copy content** retains the full value.
+Inspector source scrolls horizontally.
+Unpaired UTF-16 surrogate escapes in JSON string values are loaded as `�`, with a
+validation warning in Issues. Copies and exports contain these replacements, not
+the original code units; the source file is never modified. Unpaired surrogates
+in object keys are rejected to avoid merging distinct fields. Valid surrogate
+pairs and literal backslash-u text are preserved; other malformed JSON is rejected.
 Minimum window size is 1100 × 650. Captures are in memory only; nothing restores on restart.
 This is not feature parity with the reference: comparison, replay, sanitized exports,
 image previews, JSON trees, regex/body search, saved views, notes/pins, resizing panels,

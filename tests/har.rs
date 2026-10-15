@@ -202,6 +202,78 @@ fn bodies_headers_base64_and_binary() {
 }
 
 #[test]
+fn unpaired_surrogate_values_load_with_an_export_warning() {
+    let mut raw = entry("https://a.test", 200, 0, 1.0);
+    raw["response"]["content"]["text"] = json!("BODY");
+    for (encoded, expected, replacements) in [
+        (r"\udce9", "�", 1),
+        (r"\uD800x\uDC00", "�x�", 2),
+        (r"\uD800\u0041", "�A", 1),
+        (r"\uD800\uD83D\uDE80", "�🚀", 1),
+        (r"\uD83D\uDE80\udfff", "🚀�", 1),
+        (r"\uDBFF\uDFFF", "\u{10ffff}", 0),
+        (r"\uD7FF\uE000", "\u{d7ff}\u{e000}", 0),
+        (r"\\uD800", r"\uD800", 0),
+        (r"\\\uD800", "\\�", 1),
+        (r#"before\"\ud800:after"#, "before\"�:after", 1),
+        (r"é\udc00\t尾", "é�\t尾", 1),
+    ] {
+        let input = json!({"entries":[raw]})
+            .to_string()
+            .replace("BODY", encoded);
+        let c = Capture::parse(&input).unwrap();
+        assert_eq!(c.entries[0].body(true).unwrap(), expected, "{encoded}");
+        let output: Value = serde_json::from_str(&c.export(&[0])).unwrap();
+        assert_eq!(
+            output["entries"][0]["response"]["content"]["text"],
+            expected
+        );
+        if replacements == 0 {
+            assert!(c.warnings.is_empty(), "{encoded}");
+        } else {
+            assert_eq!(c.warnings.len(), 1, "{encoded}");
+            assert!(c.warnings[0].contains(&format!("{replacements} unpaired")));
+            assert!(c.warnings[0].contains("exports"));
+            assert!(c.warnings[0].contains("source file"));
+        }
+    }
+    let input = r#"{"_note":"\ud800","log":{"entries":[],"comment":"\udfff"}}"#;
+    let c = Capture::parse(input).unwrap();
+    assert!(c.warnings[0].contains("2 unpaired"));
+    let output: Value = serde_json::from_str(&c.export(&[])).unwrap();
+    assert_eq!(output["_note"], "�");
+    assert_eq!(output["log"]["comment"], "�");
+}
+
+#[test]
+fn surrogate_recovery_preserves_keys_and_rejects_other_invalid_json() {
+    for input in [
+        r#"{"entries":[],"\ud800":1,"\ud801":2,"\ufffd":3}"#,
+        r#"{"entries":[],"_extension":{"\udc00" :1}}"#,
+    ] {
+        let error = Capture::parse(input).unwrap_err();
+        assert!(error.contains("object key"), "{error}");
+    }
+    let c =
+        Capture::parse(r#"{"entries":[],"\ud83d\ude80":1,"\\ud800":2,"_note":"\udfff"}"#).unwrap();
+    let output: Value = serde_json::from_str(&c.export(&[])).unwrap();
+    assert_eq!(output["🚀"], 1);
+    assert_eq!(output[r"\ud800"], 2);
+    for input in [
+        r#"{"entries":[],"text":"\ud800",}"#,
+        r#"{"entries":[],"text":"\ud800\x"}"#,
+        r#"{"entries":[],"text":"\ud800\uQQQQ"}"#,
+        r#"{"entries":[],"text":"\ud800\u12"}"#,
+        r#"{"entries":[],"text":"\ud800"} trailing"#,
+        r#"{"entries":[],"text":"\ud800"#,
+        r#"{"entries":[],"text":\ud800}"#,
+        "{\"entries\":[],\"text\":\"\\ud800\n\"}",
+    ] {
+        assert!(Capture::parse(input).is_err(), "{input}");
+    }
+}
+
+#[test]
 fn export_roundtrip_metadata_extensions_and_selected_order() {
     let mut a = entry("https://a.test", 200, 0, 1.0);
     a["_vendor"] = json!({"unknown":[1,null,"x"]});

@@ -172,7 +172,7 @@ impl Viewer {
             .into_owned();
         let task = cx.background_executor().spawn(async move {
             // Bound reads too, not just metadata: files can grow between stat and read.
-            const LIMIT: u64 = 256 * 1024 * 1024;
+            const LIMIT: u64 = 1024 * 1024 * 1024;
             let file = std::fs::File::open(&path)
                 .map_err(|e| format!("Could not open {}: {e}", path.display()))?;
             let mut bytes = Vec::new();
@@ -180,7 +180,7 @@ impl Viewer {
                 .read_to_end(&mut bytes)
                 .map_err(|e| format!("Could not read file: {e}"))?;
             if bytes.len() as u64 > LIMIT {
-                return Err("Capture exceeds the 256 MiB limit for this iteration.".into());
+                return Err("Capture exceeds the 1 GiB limit for this iteration.".into());
             }
             let text = String::from_utf8(bytes).map_err(|_| "HAR must be UTF-8 JSON".to_owned())?;
             Capture::parse(text.trim_start_matches('\u{feff}'))
