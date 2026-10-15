@@ -11,9 +11,14 @@ Enable Nix flakes, then run from a **macOS desktop** or a **Linux X11/Wayland de
 
 ```sh
 nix run github:thekorn/har-viewer
-nix run github:thekorn/har-viewer -- /path/to/capture.har
+nix run github:thekorn/har-viewer -- --input /path/to/capture.har
 nix run github:thekorn/har-viewer -- --sample
 ```
+
+`--input <har file>` loads that capture immediately on launch. Quote paths containing
+spaces. File paths on the command line require `--input`; positional paths are not
+accepted. Run without arguments to start without a capture, or use `--sample` for
+the bundled fixture. `--input` and `--sample` are mutually exclusive.
 
 The repository is currently private. The `github:` shorthand needs Nix's own
 GitHub authentication while it stays private. With an existing authenticated Git

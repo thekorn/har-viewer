@@ -91,8 +91,14 @@ with (
             os.environ["DISPLAY"] = f":{number}"
             os.environ.pop("WAYLAND_DISPLAY", None)
             os.environ["XDG_RUNTIME_DIR"] = temp
+        startup_capture = json.loads(fixture.read_text())
+        startup_capture["log"]["comment"] = "Loaded from the --input file, not --sample"
+        startup_file = Path(temp) / "startup capture ü.har"
+        startup_file.write_text(json.dumps(startup_capture))
         app = subprocess.Popen(
-            [str(Path(args.binary).resolve()), "--sample"], stdout=log, stderr=log
+            [str(Path(args.binary).resolve()), "--input", str(startup_file)],
+            stdout=log,
+            stderr=log,
         )
         processes.append(app)
         if desktop:
@@ -206,7 +212,10 @@ with (
                     str(artifacts / f"{name}.png"),
                 )
 
-        assert exported() == original, "Initial export must preserve all original data"
+        key("ctrl+shift+e")
+        assert json.loads(clipboard()) == startup_capture, (
+            "--input must load the specified file and preserve all original data"
+        )
         screenshot("requests")
         if artifacts and args.record:
             recorder = subprocess.Popen(
@@ -331,7 +340,7 @@ with (
         key("ctrl+q")
         assert app.wait(timeout=10) == 0
         print(
-            "PASS: native launch, clipboard, keyboard navigation, search, empty state, combined facets, sorting, response copy, file loading, error recovery, resize, quit"
+            "PASS: native --input launch, clipboard, keyboard navigation, search, empty state, combined facets, sorting, response copy, file loading, error recovery, resize, quit"
         )
     except BaseException:
         if artifacts and window and app and app.poll() is None:

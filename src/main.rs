@@ -7,23 +7,32 @@ use gpui::{
     px, size,
 };
 
+const USAGE: &str = "Usage: har-viewer [--input <har file> | --sample]";
+
 fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.first().is_some_and(|a| a == "--help" || a == "-h") {
         println!(
-            "HAR Viewer\n\nUsage: har-viewer [capture.har | --sample]\n\nPrivate native HAR inspector. Requires macOS with Metal, or a Linux X11/Wayland desktop with Vulkan.\n{0} O: open file · {0} F: search · Up/Down: navigate · {0} Q: quit",
+            "HAR Viewer\n\n{USAGE}\n\nPrivate native HAR inspector. Requires macOS with Metal, or a Linux X11/Wayland desktop with Vulkan.\n{0} O: open file · {0} F: search · Up/Down: navigate · {0} Q: quit",
             platform::PRIMARY_LABEL
         );
         return;
     }
-    if args.len() > 1
-        || args
-            .first()
-            .is_some_and(|a| a.to_string_lossy().starts_with('-') && a != "--sample")
-    {
-        eprintln!("Usage: har-viewer [capture.har | --sample]");
-        std::process::exit(2);
-    }
+    let input = match args.as_slice() {
+        [] => None,
+        [arg] if arg == "--sample" => Some(arg.clone()),
+        [option, path]
+            if option == "--input"
+                && !path.is_empty()
+                && !path.to_string_lossy().starts_with('-') =>
+        {
+            Some(path.clone())
+        }
+        _ => {
+            eprintln!("{USAGE}");
+            std::process::exit(2);
+        }
+    };
     #[cfg(target_os = "linux")]
     if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
         eprintln!("HAR Viewer needs an X11 or Wayland desktop. Run it from your desktop session.");
@@ -52,7 +61,7 @@ fn main() {
             |window, cx| {
                 let view = cx.new(|cx| {
                     let mut viewer = app::Viewer::new(cx);
-                    if let Some(arg) = args.first() {
+                    if let Some(arg) = &input {
                         if arg == "--sample" {
                             viewer.sample(cx);
                         } else {
