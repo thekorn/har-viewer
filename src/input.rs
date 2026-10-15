@@ -1,5 +1,6 @@
 // Adapted from GPUI 0.2.2 examples/input.rs (Apache-2.0).
 // See THIRD_PARTY_NOTICES.md for source, copyright and license.
+use crate::platform::UI_FONT;
 use std::ops::Range;
 
 use gpui::{
@@ -708,7 +709,7 @@ impl Render for TextInput {
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .bg(rgb(0x17171c))
             .text_color(rgb(0xe5e5ec))
-            .font_family("DejaVu Sans")
+            .font_family(UI_FONT)
             .border_1()
             .border_color(rgb(0x38333f))
             .rounded_md()

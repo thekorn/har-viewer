@@ -13,8 +13,12 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
       - uses: cachix/install-nix-action@v31
@@ -26,11 +30,17 @@ jobs:
         run: nix develop --impure -c har-coverage
       - name: Build native app
         run: nix develop --impure -c cargo build --locked
+      # macOS UI checks use a logged-in desktop with Metal and explicit privacy
+      # permissions. Run har-smoke --use-desktop on a Mac, not a headless CI VM.
       - name: Real desktop smoke test
+        if: runner.os == 'Linux'
         run: nix develop --impure -c har-smoke
       - name: Build and test distribution
         run: nix develop --impure -c har-package
+      - name: Check packaged CLI
+        run: ./result/bin/har-viewer --help
       - name: Check packaged desktop app
+        if: runner.os == 'Linux'
         run: >-
           nix develop --impure -c env
           -u LD_LIBRARY_PATH -u FONTCONFIG_FILE -u VK_DRIVER_FILES

@@ -1,6 +1,10 @@
 { pkgs }:
 with pkgs;
 [
+  openssl
+  zstd
+]
+++ lib.optionals stdenv.hostPlatform.isLinux [
   fontconfig
   freetype
   libxkbcommon
@@ -9,6 +13,4 @@ with pkgs;
   libGL
   libx11
   libxcb
-  openssl
-  zstd
 ]

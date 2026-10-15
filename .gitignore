@@ -1,6 +1,7 @@
 /target/
 /.devenv/
 /.direnv/
+__pycache__/
 /.amp/
 /result
 /result-*

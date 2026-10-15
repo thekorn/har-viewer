@@ -1,4 +1,5 @@
 use crate::input::{Changed, TextInput};
+use crate::platform::{MONO_FONT, PRIMARY_LABEL, PRIMARY_MODIFIER, UI_FONT};
 use gpui::{
     App, ClipboardItem, Context, Entity, ExternalPaths, FocusHandle, Focusable, KeyBinding,
     PathPromptOptions, ScrollStrategy, SharedString, Subscription, UniformListScrollHandle, Window,
@@ -72,22 +73,35 @@ pub struct Viewer {
 pub fn init(cx: &mut App) {
     crate::input::init(cx);
     cx.bind_keys([
-        KeyBinding::new("ctrl-o", Open, Some("Viewer")),
-        KeyBinding::new("ctrl-f", Search, Some("Viewer")),
+        KeyBinding::new(&format!("{PRIMARY_MODIFIER}-o"), Open, Some("Viewer")),
+        KeyBinding::new(&format!("{PRIMARY_MODIFIER}-f"), Search, Some("Viewer")),
         KeyBinding::new("down", Next, Some("Viewer && !TextInput")),
         KeyBinding::new("up", Previous, Some("Viewer && !TextInput")),
         KeyBinding::new("escape", Escape, Some("Viewer")),
         KeyBinding::new("enter", Submit, Some("Viewer")),
-        KeyBinding::new("ctrl-shift-c", CopyUrl, Some("Viewer")),
-        KeyBinding::new("ctrl-shift-e", CopyHar, Some("Viewer")),
-        KeyBinding::new("ctrl-q", Quit, None),
+        KeyBinding::new(
+            &format!("{PRIMARY_MODIFIER}-shift-c"),
+            CopyUrl,
+            Some("Viewer"),
+        ),
+        KeyBinding::new(
+            &format!("{PRIMARY_MODIFIER}-shift-e"),
+            CopyHar,
+            Some("Viewer"),
+        ),
+        KeyBinding::new(&format!("{PRIMARY_MODIFIER}-q"), Quit, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
 }
 
 impl Viewer {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| TextInput::new("Filter URL, method or status…  Ctrl F", cx));
+        let search = cx.new(|cx| {
+            TextInput::new(
+                &format!("Filter URL, method or status…  {PRIMARY_LABEL} F"),
+                cx,
+            )
+        });
         let path = cx.new(|cx| TextInput::new("/path/to/capture.har", cx));
         let subscription = cx.subscribe(&search, |this, input, _: &Changed, cx| {
             if let Some(s) = &mut this.session {
@@ -410,7 +424,7 @@ impl Viewer {
                     .child("●  LOCAL ONLY"),
             )
             .child(
-                button("open", "Open HAR  Ctrl O")
+                button("open", &format!("Open HAR  {PRIMARY_LABEL} O"))
                     .on_click(cx.listener(|this, _, window, cx| this.open(&Open, window, cx))),
             )
             .when(self.session.is_some(), |d| {
@@ -1095,7 +1109,7 @@ impl Viewer {
                                         .h(px(23.))
                                         .px_3()
                                         .gap_3()
-                                        .font_family("DejaVu Sans Mono")
+                                        .font_family(MONO_FONT)
                                         .text_size(px(11.))
                                         .child(
                                             div()
@@ -1241,7 +1255,7 @@ impl Viewer {
                             .child("or open a capture from your device"),
                     )
                     .child(
-                        button("welcome-open", "Open HAR file  Ctrl O")
+                        button("welcome-open", &format!("Open HAR file  {PRIMARY_LABEL} O"))
                             .bg(rgb(SELECTED))
                             .text_color(rgb(ACCENT))
                             .on_click(
@@ -1273,7 +1287,7 @@ impl Render for Viewer {
         {
             window.focus(&self.focus);
         }
-        col().size_full().bg(rgb(BG)).text_color(rgb(TEXT)).font_family("DejaVu Sans").text_size(px(12.))
+        col().size_full().bg(rgb(BG)).text_color(rgb(TEXT)).font_family(UI_FONT).text_size(px(12.))
             .key_context("Viewer").track_focus(&self.focus)
             .on_action(cx.listener(Self::open)).on_action(cx.listener(Self::search_action))
             .on_action(cx.listener(Self::next)).on_action(cx.listener(Self::previous))
@@ -1303,7 +1317,7 @@ impl Render for Viewer {
                 .when_some(self.session.as_ref(), |d, s| d.child(format!("{} / {} requests", s.visible.len(), s.capture.entries.len()))
                     .child(format!("Resources {}", bytes(s.summary.bytes))).child(format!("Finish {}", duration(s.summary.duration_ms))))
                 .child(div().flex_1().overflow_hidden().text_ellipsis().text_color(rgb(MUTED)).child(self.notice.clone()))
-                .child(div().text_color(rgb(MUTED)).child("↑ ↓ Navigate   ·   Ctrl F Search   ·   Esc Unfocus")))
+                .child(div().text_color(rgb(MUTED)).child(format!("↑ ↓ Navigate   ·   {PRIMARY_LABEL} F Search   ·   Esc Unfocus"))))
     }
 }
 

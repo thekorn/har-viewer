@@ -1,6 +1,7 @@
-"""Real GPUI/X11 smoke test. Run with devenv's har-smoke, never a browser mock.
+"""Real GPUI smoke test. Run with devenv's har-smoke, never a browser mock.
 
-Owns and terminates its virtual display and app; never touches an existing desktop.
+Linux owns its virtual display; macOS requires explicit real-desktop opt-in.
+Only the app launched by this script is targeted and terminated.
 Clipboard assertions exercise public keyboard/pointer behavior and exported HAR data.
 """
 
@@ -8,6 +9,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -16,7 +18,19 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--binary", default="target/debug/har-viewer")
 parser.add_argument("--artifacts", type=Path)
 parser.add_argument("--record", action="store_true")
+parser.add_argument(
+    "--use-desktop",
+    action="store_true",
+    help="Allow macOS automation on the real, otherwise idle desktop",
+)
 args = parser.parse_args()
+macos = sys.platform == "darwin"
+if macos and not args.use_desktop:
+    parser.error("macOS requires --use-desktop; automation uses your real desktop")
+if macos and args.record:
+    parser.error(
+        "--record is unsupported on macOS; use --artifacts for owned-window screenshots"
+    )
 root = Path(__file__).resolve().parent.parent
 fixture = root / "fixtures/sample.har"
 original = json.loads(fixture.read_text())["log"]["entries"]
@@ -29,6 +43,13 @@ def run(*command, **kwargs):
     return subprocess.check_output(command, text=True, timeout=15, **kwargs).strip()
 
 
+desktop = None
+if macos:
+    from desktop_macos import MacDesktop
+
+    desktop = MacDesktop(bool(artifacts), run)
+
+
 with (
     tempfile.TemporaryDirectory(prefix="har-desktop-") as temp,
     open(Path(temp) / "desktop.log", "w+") as log,
@@ -38,74 +59,97 @@ with (
     window = None
     app = None
     try:
-        read_fd, write_fd = os.pipe()
-        display = subprocess.Popen(
-            [
-                "Xvfb",
-                "-displayfd",
-                str(write_fd),
-                "-screen",
-                "0",
-                "1440x900x24",
-                "-nolisten",
-                "tcp",
-            ],
-            pass_fds=(write_fd,),
-            stdout=log,
-            stderr=log,
-        )
-        processes.append(display)
-        os.close(write_fd)
-        import select
+        if not desktop:
+            read_fd, write_fd = os.pipe()
+            try:
+                display = subprocess.Popen(
+                    [
+                        "Xvfb",
+                        "-displayfd",
+                        str(write_fd),
+                        "-screen",
+                        "0",
+                        "1440x900x24",
+                        "-nolisten",
+                        "tcp",
+                    ],
+                    pass_fds=(write_fd,),
+                    stdout=log,
+                    stderr=log,
+                )
+                processes.append(display)
+            finally:
+                os.close(write_fd)
+            import select
 
-        assert select.select([read_fd], [], [], 15)[0], "Xvfb did not start"
-        number = os.read(read_fd, 32).decode().strip()
-        os.close(read_fd)
-        os.environ["DISPLAY"] = f":{number}"
-        os.environ.pop("WAYLAND_DISPLAY", None)
-        os.environ["XDG_RUNTIME_DIR"] = temp
+            try:
+                assert select.select([read_fd], [], [], 15)[0], "Xvfb did not start"
+                number = os.read(read_fd, 32).decode().strip()
+                assert number.isdigit(), "Xvfb did not provide a display number"
+            finally:
+                os.close(read_fd)
+            os.environ["DISPLAY"] = f":{number}"
+            os.environ.pop("WAYLAND_DISPLAY", None)
+            os.environ["XDG_RUNTIME_DIR"] = temp
         app = subprocess.Popen(
             [str(Path(args.binary).resolve()), "--sample"], stdout=log, stderr=log
         )
         processes.append(app)
-        window = None
-        for _ in range(100):
-            result = subprocess.run(
-                ["xdotool", "search", "--name", "^HAR Viewer$"],
-                capture_output=True,
-                text=True,
-                check=False,
+        if desktop:
+            desktop.start(app)
+            window = str(app.pid)
+        else:
+            for _ in range(100):
+                result = subprocess.run(
+                    ["xdotool", "search", "--name", "^HAR Viewer$"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    window = result.stdout.splitlines()[0]
+                    break
+                assert app.poll() is None, "App exited before opening a window"
+                time.sleep(0.2)
+            assert window, "No native window appeared"
+            run(
+                "xdotool",
+                "windowmap",
+                window,
+                "windowmove",
+                window,
+                "0",
+                "0",
+                "windowsize",
+                window,
+                "1440",
+                "900",
+                "windowfocus",
+                window,
             )
-            if result.returncode == 0:
-                window = result.stdout.splitlines()[0]
-                break
-            assert app.poll() is None, "App exited before opening a window"
-            time.sleep(0.2)
-        assert window, "No native window appeared"
-        run(
-            "xdotool",
-            "windowmap",
-            window,
-            "windowmove",
-            window,
-            "0",
-            "0",
-            "windowsize",
-            window,
-            "1440",
-            "900",
-            "windowfocus",
-            window,
-        )
         time.sleep(1)
 
         def key(keys):
+            if desktop:
+                return desktop.key(keys)
             run("xdotool", "key", "--clearmodifiers", keys)
             time.sleep(0.25)
+
+        def type_text(text):
+            if desktop:
+                return desktop.type_text(text)
+            run("xdotool", "type", "--clearmodifiers", "--delay", "35", text)
+
+        def resize(width, height):
+            if desktop:
+                return desktop.resize(width, height)
+            run("xdotool", "windowsize", window, str(width), str(height))
 
         pointer = [700, 400]
 
         def click(x, y):
+            if desktop:
+                return desktop.click(x, y)
             # Genuine pointer motion passes over neighbors; useful in recordings too.
             start = pointer[:]
             for step in range(1, 9):
@@ -121,6 +165,8 @@ with (
             time.sleep(0.3)
 
         def clipboard(expected=None):
+            if desktop:
+                return desktop.clipboard(expected)
             # X11 selection transfer is asynchronous; wait for the requested value,
             # without sending the copy action again or accepting stale clipboard data.
             deadline = time.monotonic() + 5
@@ -142,7 +188,7 @@ with (
             key("ctrl+f")
             key("ctrl+a")
             if text:
-                run("xdotool", "type", "--clearmodifiers", "--delay", "35", text)
+                type_text(text)
             else:
                 key("BackSpace")
             key("Escape")
@@ -150,6 +196,8 @@ with (
         def screenshot(name):
             if artifacts:
                 time.sleep(0.3)
+                if desktop:
+                    return desktop.screenshot(artifacts / f"{name}.png")
                 run(
                     "magick",
                     "import",
@@ -254,20 +302,11 @@ with (
         # File I/O via the real native path input, including failure recovery.
         key("ctrl+o")
         time.sleep(0.8)
-        run(
-            "xdotool",
-            "type",
-            "--clearmodifiers",
-            "--delay",
-            "35",
-            str(root / "Cargo.toml"),
-        )
+        type_text(str(root / "Cargo.toml"))
         key("ctrl+a")
         key("ctrl+c")
         copied_path = clipboard(str(root / "Cargo.toml"))
-        assert copied_path == str(root / "Cargo.toml"), (
-            f"Path field accepts native text; got {copied_path!r}"
-        )
+        assert copied_path == str(root / "Cargo.toml"), "Path field accepts native text"
         key("Return")
         time.sleep(0.5)
         screenshot("invalid-file")
@@ -276,7 +315,7 @@ with (
         key("ctrl+o")
         time.sleep(0.8)
         key("ctrl+a")
-        run("xdotool", "type", "--clearmodifiers", "--delay", "35", str(fixture))
+        type_text(str(fixture))
         key("ctrl+a")
         key("ctrl+c")
         assert clipboard(str(fixture)) == str(fixture), "Path replacement"
@@ -286,17 +325,26 @@ with (
         assert exported() == original, (
             "Open path replaces capture and resets filters/sort"
         )
-        run("xdotool", "windowsize", window, "1100", "700")
+        resize(1100, 650 if desktop else 700)
         screenshot("compact")
-        run("xdotool", "windowsize", window, "1440", "900")
+        resize(1440, 900)
         key("ctrl+q")
         assert app.wait(timeout=10) == 0
         print(
-            "PASS: native X11 launch, clipboard, keyboard navigation, search, empty state, combined facets, sorting, response copy, file loading, error recovery, resize, quit"
+            "PASS: native launch, clipboard, keyboard navigation, search, empty state, combined facets, sorting, response copy, file loading, error recovery, resize, quit"
         )
     except BaseException:
-        if artifacts and window and app.poll() is None:
-            screenshot("failure")
+        if artifacts and window and app and app.poll() is None:
+            try:
+                screenshot("failure")
+            except (
+                OSError,
+                RuntimeError,
+                subprocess.SubprocessError,
+                AssertionError,
+                ValueError,
+            ) as error:
+                print(f"Failure screenshot unavailable: {type(error).__name__}")
         log.flush()
         log.seek(0)
         print(log.read())
@@ -310,3 +358,5 @@ with (
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
+        if desktop:
+            desktop.close()

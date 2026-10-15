@@ -17,6 +17,7 @@ rustPlatform.buildRustPackage {
       ../Cargo.lock
       ../src
       ../fixtures
+      ../tests/cli.rs
       ../tests/har.rs
       ../tests/session.rs
       ../LICENSE
@@ -28,13 +29,14 @@ rustPlatform.buildRustPackage {
     pkg-config
     clang
     makeWrapper
-  ];
+  ]
+  ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ rustPlatform.bindgenHook ];
   buildInputs = import ./libraries.nix { inherit pkgs; };
   postInstall = ''
     install -Dm644 LICENSE $out/share/licenses/har-viewer/LICENSE
     install -Dm644 THIRD_PARTY_NOTICES.md $out/share/licenses/har-viewer/THIRD_PARTY_NOTICES.md
   '';
-  postFixup = ''
+  postFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
     wrapProgram $out/bin/har-viewer \
       --prefix LD_LIBRARY_PATH : ${
         lib.makeLibraryPath (import ./libraries.nix { inherit pkgs; })
@@ -47,6 +49,6 @@ rustPlatform.buildRustPackage {
     homepage = "https://github.com/thekorn/har-viewer";
     license = lib.licenses.mit;
     mainProgram = "har-viewer";
-    platforms = lib.platforms.linux;
+    platforms = lib.platforms.linux ++ [ "aarch64-darwin" ];
   };
 }

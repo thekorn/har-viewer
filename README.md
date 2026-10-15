@@ -7,7 +7,7 @@ not a browser wrapper.
 
 ## Run with Nix
 
-Enable Nix flakes, then run from an **X11 or Wayland desktop**:
+Enable Nix flakes, then run from a **macOS desktop** or a **Linux X11/Wayland desktop**:
 
 ```sh
 nix run github:thekorn/har-viewer
@@ -23,11 +23,12 @@ credential helper, use this form instead (no token in the command or URL):
 nix run 'git+https://github.com/thekorn/har-viewer?ref=main' -- --sample
 ```
 
-Linux packages are provided for x86_64 and aarch64. x86_64 is the tested target;
-aarch64 uses the same derivation but has not been validated on hardware. macOS and
-Windows are not supported in this iteration.
+Packages and development shells are provided for Linux (x86_64 and aarch64) and
+Apple Silicon macOS (aarch64). macOS uses native Cocoa windows and Metal; it does
+not need XQuartz, Vulkan, or a Linux VM. The pinned Nixpkgs has dropped Intel Mac
+support; Intel macOS and Windows are not supported by this flake.
 
-GPUI needs Vulkan. On NixOS, enable `hardware.graphics.enable`. On other Linux
+On Linux, GPUI needs Vulkan. On NixOS, enable `hardware.graphics.enable`. On other Linux
 distributions, or machines without a usable Vulkan GPU, use the bundled software
 renderer (slower, but does not require a host GPU driver):
 
@@ -36,9 +37,14 @@ HAR_VIEWER_SOFTWARE=1 nix run github:thekorn/har-viewer -- --sample
 ```
 
 The first run builds from source and can take several minutes. A desktop session
-is still required with software rendering. Native Browse/Save dialogs additionally
-need session D-Bus and a working XDG desktop portal backend. **Open HAR** also
+is still required with software rendering. On Linux, native Browse/Save dialogs
+additionally need session D-Bus and a working XDG desktop portal backend. **Open HAR** also
 accepts a full file path, and **Copy filtered HAR** works without portals.
+
+On macOS, Nix supplies the SDK and bindgen toolchain; host Xcode is not required.
+GPUI compiles embedded Metal shader source when the renderer starts, avoiding
+Xcode's proprietary build-time shader compiler. A Metal-capable GPU is required;
+`HAR_VIEWER_SOFTWARE` has no effect on macOS.
 
 ## First iteration
 
@@ -63,6 +69,8 @@ before sharing. Resource sizes are decoded HAR content sizes, not wire transfer 
 unknown sizes contribute zero to totals. Unknown timestamps do not extend capture time.
 
 ### Shortcuts
+
+Use **Command (⌘)** instead of **Ctrl** on macOS. In-app hints follow the platform.
 
 | Shortcut | Action |
 | --- | --- |
@@ -89,6 +97,9 @@ light theme, websocket tooling and initiator trees remain future work.
 Only Nix is needed on the host. `flake.lock` pins nixpkgs and devenv; `Cargo.lock`
 pins Rust dependencies. The flake's development shell **is** a `devenv.lib.mkShell`
 using `devenv.nix`; there is no parallel ad-hoc toolchain or system package setup.
+Use `nix develop --impure` on both platforms for the pinned CI toolchain.
+The standalone `devenv shell` command also reads this module, but resolves its own
+inputs in `devenv.lock`, independently of `flake.lock`.
 
 ```sh
 nix develop --impure
@@ -96,14 +107,19 @@ har-dev --sample
 har-check       # rustfmt, Clippy -D warnings, Rust tests, nixfmt, statix, deadnix
 har-coverage    # domain + session coverage, minimum 90% lines (not a UI coverage claim)
 har-build      # release Cargo build
-har-package    # sandboxed Nix distribution build, including Rust tests
-har-smoke      # real GPUI window on isolated Xvfb + software Vulkan; build debug first
+har-package    # Nix distribution build, including Rust tests
+har-smoke      # Linux: isolated Xvfb + software Vulkan; build debug first
+# macOS: har-smoke --use-desktop (see permissions below)
 ```
 
 For automation use `nix develop --impure -c har-check`, etc. `--impure` lets devenv
 locate the checkout; the distribution package itself builds in pure Nix evaluation.
+Build sandboxing is separate: it follows the Nix daemon's `sandbox` setting.
+In particular, do not treat a successful macOS package build as sandbox validation
+when sandboxing is disabled or the daemon rejects an untrusted override.
 Direnv users can run `direnv allow`. For software rendering during development:
-`har-software har-dev --sample`.
+`har-software har-dev --sample` on Linux. On macOS, `har-software` simply runs its
+command with the native Metal renderer.
 
 ```sh
 nix develop --impure -c cargo build --locked
@@ -111,16 +127,39 @@ nix develop --impure -c har-smoke --artifacts .amp/in/artifacts
 nix develop --impure -c har-smoke --binary ./result/bin/har-viewer
 ```
 
+On macOS, the same smoke assertions run against the real desktop, not Xvfb:
+
+```sh
+nix develop --impure -c cargo build --locked
+nix develop --impure -c har-smoke --use-desktop --artifacts .amp/in/artifacts
+nix develop --impure -c har-smoke --use-desktop --binary ./result/bin/har-viewer
+```
+
+Unlock the screen and leave the desktop idle during this test. It focuses only
+the app it starts, requires room for a 1440 × 900 content area, and preserves the
+clipboard in memory (restoring it unless it changed outside the test). Grant the
+launching terminal/Python **Accessibility** and **Automation → System Events**
+permissions in System Settings. **Screen Recording** is needed only with
+`--artifacts`; captures contain only the owned app window and fictional fixture.
+The script never changes privacy permissions. Video recording (`--record`) is
+Linux-only. None of these automation permissions are needed for normal app use.
+
 Tests cover malformed/partial HAR, timezone offsets, timing arithmetic, unknown
 sizes, stable sorting, combined filters, Unicode search, base64 errors, metadata
 round trips, real shell argument quoting, and navigation after filtering. The
 desktop smoke test asserts clipboard and exported data through real keyboard and
 pointer input, including sorting, facets, response inspection and file-load recovery.
 
+CI is configured to build and check both Linux architectures and Apple Silicon
+macOS, including Nix packages and the headless CLI contract. Linux also runs the
+debug and packaged desktop smoke tests. macOS native rendering/interaction must
+be checked on an unlocked Mac with Metal and the permissions above; the hosted
+CI job does not establish UI coverage.
+
 `libc` is locked to 0.2.186 because GPUI 0.2.2's transitive `xattr` 0.2.3 uses
 `ENOATTR`, removed in libc 0.2.190. Do not blindly update that lock entry without
 fixing/upgrading the upstream chain. The build currently also reports an upstream
-future-compatibility warning in `proc-macro-error2`.
+future-compatibility warning in `proc-macro-error2`, and in `block` on macOS.
 
 Known dependency advisory: GPUI 0.2.2 pins Taffy 0.9.0, which pulls in Grid 0.18.0
 affected by [GHSA-38c5-483c-4qqp](https://github.com/advisories/GHSA-38c5-483c-4qqp)
