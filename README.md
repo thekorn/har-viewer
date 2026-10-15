@@ -4,9 +4,9 @@
 
 # HAR Viewer
 
-A private, native HTTP archive inspector built with **Rust and GPUI**, with a compact dark
-workspace, faceted filters and a request inspector. This is a native application,
-not a browser wrapper.
+A private, native HTTP archive inspector built with **Rust, GPUI and
+[GPUI Component](https://gpui-kit.com)**, with the library's dark theme, faceted
+filters and a request inspector. This is a native application, not a browser wrapper.
 
 ## Run with Nix
 
@@ -66,8 +66,10 @@ does not provide the macOS app icon.
 
 - Open via command line, native file chooser, path input or file drop; bundled
   fictional shopping capture for exploration. Parsing runs in the background.
-- Virtualized request table; sort by method, URL, status, type, size or duration.
-  Close the inspector to show the extra table columns.
+- Virtualized component table; sort by method, URL, status, type, size or duration
+  using each column's sort icon (descending, ascending, then capture-time order).
+  All columns remain available with horizontal scrolling; close the inspector for
+  more table space.
 - Case-insensitive URL/method/status search; status, method, resource type and
   domain filters; slow-request preset. Choices within a facet are OR, facets AND.
   Sidebar counts describe the whole capture; table and overview reflect filters.
@@ -194,10 +196,20 @@ the dependency graph is free of known advisories.
 ## Structure
 
 `src/har.rs` is the pure parsing/analysis/export layer; `src/session.rs` owns visible
-selection and navigation. `src/app.rs` renders and coordinates native I/O;
-`src/input.rs` is the version-matched GPUI native input implementation. No network
-or filesystem operations live in the HAR model. Nix runtime libraries are shared
+selection and navigation. `src/app.rs` composes library components and coordinates
+native I/O; `src/request_table.rs` adapts the session to the library's virtualized
+table. Buttons, inputs (including the read-only inspector editor), tabs, sidebar,
+alerts, histogram, progress bars and scrollbars come from GPUI Component. Only the
+HAR-specific stacked waterfall rendering remains application-owned. No network or
+filesystem operations live in the HAR model. Nix runtime libraries are shared
 between the devenv shell and distribution package.
+
+GPUI Component and its embedded icon assets are pinned to **0.5.1**, the last stable
+release compatible with GPUI **0.2.2**. Current GPUI Kit releases require a different
+GPUI engine; upgrading them is not a drop-in dependency update. No webview or
+remote assets are used. The library's dark theme uses normal foreground text for
+table headers and alerts for readability; fonts use the platform defaults already
+packaged by this project.
 
 `assets/icon.svg` is the editable Waterfall artwork. The checked-in PNG sizes and
 macOS ICNS are generated from it, with transparent margins. Regenerate on Linux
@@ -207,6 +219,5 @@ the packaged launcher/bundle, icon resources and headless CLI on either platform
 
 ## License and credits
 
-MIT for this application. The text-input adaptation is Apache-2.0; see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The reference project's interaction
-model and visual hierarchy guided this independently written Rust application.
+MIT for this application. GPUI and GPUI Component are Apache-2.0; the bundled Lucide
+icons are ISC/MIT. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

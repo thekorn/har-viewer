@@ -1,11 +1,13 @@
 mod app;
-mod input;
 mod platform;
+mod request_table;
 
 use gpui::{
     App, Application, Bounds, Focusable, TitlebarOptions, WindowBounds, WindowOptions, prelude::*,
     px, size,
 };
+use gpui_component::{Root, Theme, ThemeMode};
+use gpui_component_assets::Assets;
 
 const USAGE: &str = "Usage: har-viewer [--input <har file> | --sample]";
 
@@ -38,7 +40,13 @@ fn main() {
         eprintln!("HAR Viewer needs an X11 or Wayland desktop. Run it from your desktop session.");
         std::process::exit(1);
     }
-    Application::new().run(move |cx: &mut App| {
+    Application::new().with_assets(Assets).run(move |cx: &mut App| {
+        gpui_component::init(cx);
+        Theme::change(ThemeMode::Dark, None, cx);
+        let theme = Theme::global_mut(cx);
+        theme.font_family = platform::UI_FONT.into();
+        theme.mono_font_family = platform::MONO_FONT.into();
+        theme.table_head_foreground = theme.foreground;
         app::init(cx);
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
@@ -60,7 +68,7 @@ fn main() {
             },
             |window, cx| {
                 let view = cx.new(|cx| {
-                    let mut viewer = app::Viewer::new(cx);
+                    let mut viewer = app::Viewer::new(window, cx);
                     if let Some(arg) = &input {
                         if arg == "--sample" {
                             viewer.sample(cx);
@@ -71,7 +79,7 @@ fn main() {
                     viewer
                 });
                 window.focus(&view.focus_handle(cx));
-                view
+                cx.new(|cx| Root::new(view, window, cx))
             },
         );
         if let Err(error) = result {

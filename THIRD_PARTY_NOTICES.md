@@ -1,29 +1,65 @@
 # Third-party notices
 
-## GPUI native text input example (0.2.2)
+## GPUI and GPUI Component
 
-`src/input.rs` is adapted from the official `examples/input.rs` included in the
-published GPUI **0.2.2** crate:
+This application links GPUI 0.2.2, GPUI Component 0.5.1 and its bundled assets.
+The custom text-input adaptation has been replaced by the component library.
 
-- Download used: https://crates.io/api/v1/crates/gpui/0.2.2/download
-- Source: https://docs.rs/crate/gpui/0.2.2/source/examples/input.rs
-- Repository baseline: https://github.com/zed-industries/zed/blob/69e2130295c2649963eb639fc70b4f2ee8ea1624/crates/gpui/examples/input.rs
+- GPUI: https://docs.rs/crate/gpui/0.2.2/source/
+- GPUI Component and assets: https://github.com/longbridge/gpui-kit/tree/v0.5.1
 
 Copyright 2022 - 2025 Zed Industries, Inc.
+Copyright 2024 - 2025 Longbridge <https://longbridge.com>
 
-Licensed under the Apache License, Version 2.0. This portion remains under that
-license, independently of this application's MIT license.
+Licensed under the Apache License, Version 2.0, independently of this application's
+MIT license. The Apache license is reproduced below.
 
-Modifications: removed the demo application and surrounding UI; added public
-construction/value APIs and change events, scoped Ctrl/Cmd shortcuts, dark
-single-line styling, clipping and horizontal caret scrolling; corrected focus,
-selection direction, IME-relative selection and point hit testing; normalized
-line breaks and added Unicode helper tests.
+## Lucide icons (bundled by GPUI Component)
 
-The upstream license is reproduced below.
+Source and license: https://lucide.dev/license
+
+ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT,
+OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS
+ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+### Feather-derived Lucide icons
+
+The MIT License (MIT)
+
+Copyright (c) 2013-present Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ---
 Copyright 2022 - 2025 Zed Industries, Inc.
+Copyright 2024 - 2025 Longbridge <https://longbridge.com>
 
 
    Licensed under the Apache License, Version 2.0 (the "License");

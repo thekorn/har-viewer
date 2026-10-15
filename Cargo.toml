@@ -8,7 +8,7 @@ repository = "https://github.com/thekorn/har-viewer"
 
 [features]
 default = ["desktop"]
-desktop = ["dep:gpui", "dep:unicode-segmentation"]
+desktop = ["dep:gpui", "dep:gpui-component", "dep:gpui-component-assets"]
 
 [[bin]]
 name = "har-viewer"
@@ -18,11 +18,13 @@ required-features = ["desktop"]
 [dependencies]
 # Compile Metal shaders at runtime so macOS builds need no proprietary Xcode tools.
 gpui = { version = "=0.2.2", optional = true, default-features = false, features = ["x11", "wayland", "runtime_shaders"] }
+# Last component release compatible with the pinned GPUI engine.
+gpui-component = { version = "=0.5.1", optional = true, default-features = false }
+gpui-component-assets = { version = "=0.5.1", optional = true }
 serde_json = "1"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 url = "2"
-unicode-segmentation = { version = "1", optional = true }
 
 [profile.dev]
 debug = 0

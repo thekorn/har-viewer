@@ -42,7 +42,7 @@ rustPlatform.buildRustPackage {
       ../THIRD_PARTY_NOTICES.md
     ];
   };
-  cargoHash = "sha256-iVFk49budfryiAuPTsy6n08MnbLk1uS9w8oLe8kGaQk=";
+  cargoHash = "sha256-6DnnQcbKlB+l+CEWfktLZPZh7yIDftxZ6FYSu+tzRHs=";
   nativeBuildInputs = [
     pkg-config
     clang
