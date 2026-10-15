@@ -4,8 +4,7 @@
 
 # HAR Viewer
 
-A private, native HTTP archive inspector built with **Rust and GPUI**. Inspired by
-[0xpanadol/har-viewer](https://github.com/0xpanadol/har-viewer), with a compact dark
+A private, native HTTP archive inspector built with **Rust and GPUI**, with a compact dark
 workspace, faceted filters and a request inspector. This is a native application,
 not a browser wrapper.
 
@@ -44,16 +43,6 @@ renderer (slower, but does not require a host GPU driver):
 ```sh
 HAR_VIEWER_SOFTWARE=1 nix run github:thekorn/har-viewer -- --sample
 ```
-
-The first run builds from source and can take several minutes. A desktop session
-is still required with software rendering. On Linux, native Browse/Save dialogs
-additionally need session D-Bus and a working XDG desktop portal backend. **Open HAR** also
-accepts a full file path, and **Copy filtered HAR** works without portals.
-
-On macOS, Nix supplies the SDK and bindgen toolchain; host Xcode is not required.
-GPUI compiles embedded Metal shader source when the renderer starts, avoiding
-Xcode's proprietary build-time shader compiler. A Metal-capable GPU is required;
-`HAR_VIEWER_SOFTWARE` has no effect on macOS.
 
 ### Desktop installation and icon
 
@@ -112,7 +101,7 @@ Use **Command (⌘)** instead of **Ctrl** on macOS. In-app hints follow the plat
 
 ### Deliberate limits
 
-Files are limited to 1 GiB (1,073,741,824 bytes). Body previews show at most 5,000
+HAR-Files are limited to 1 GiB (1,073,741,824 bytes). Body previews show at most 5,000
 lines, 2,000 characters per line; **Copy content** retains the full value.
 Inspector source scrolls horizontally.
 Unpaired UTF-16 surrogate escapes in JSON string values are loaded as `�`, with a
