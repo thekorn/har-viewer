@@ -164,10 +164,18 @@ round trips, real shell argument quoting, and navigation after filtering. The
 desktop smoke test asserts clipboard and exported data through real keyboard and
 pointer input, including sorting, facets, response inspection and file-load recovery.
 
-CI builds and checks Ubuntu Linux on x86_64 and aarch64, including Nix packages,
-the headless CLI contract, and debug and packaged desktop smoke tests. macOS
-validation is manual for now; native rendering/interaction must be checked on
-an unlocked Mac with Metal and the permissions above.
+CI builds and checks only Ubuntu 24.04 on x86_64, including Nix packages, the
+headless CLI contract, and debug and packaged desktop smoke tests. The matrix
+contains one runner; aarch64 packages remain available but are not built in CI.
+macOS validation is manual for now; native rendering/interaction must be checked
+on an unlocked Mac with Metal and the permissions above.
+
+CI caches the Nix store and Cargo dependencies (including coverage build artifacts)
+separately. Keys track the pinned toolchain and dependency/build configuration,
+not each source commit. Pull requests restore caches; only successful pushes to
+`main` save them. Nix garbage collection targets a 6 GiB store before saving,
+but rooted build and shell closures can exceed that target. Cache hits never skip
+checks or tests, and no additional cache service credentials are required.
 
 `libc` is locked to 0.2.186 because GPUI 0.2.2's transitive `xattr` 0.2.3 uses
 `ENOATTR`, removed in libc 0.2.190. Do not blindly update that lock entry without

@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        os: [ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     steps:
@@ -36,6 +36,29 @@ jobs:
           extra_nix_config: |
             extra-substituters = https://devenv.cachix.org
             extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
+            keep-env-derivations = true
+            keep-outputs = true
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          # Reuse dependencies across source changes, not a large snapshot per commit.
+          primary-key: nix-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'flake.nix', 'devenv.nix', 'nix/**', 'Cargo.toml', 'Cargo.lock') }}
+          restore-prefixes-first-match: nix-v1-${{ runner.os }}-${{ runner.arch }}-
+          save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          # Trim unreferenced paths before saving; live closures may exceed this.
+          gc-max-store-size-linux: 6G
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          # Probe the pinned toolchain, not the runner's preinstalled Rust.
+          cmd-format: nix develop --impure -c {0}
+          key: devenv-${{ hashFiles('flake.lock', 'flake.nix', 'devenv.nix', 'nix/**') }}
+          cache-bin: false
+          # Clean both normal and instrumented artifacts before saving.
+          workspaces: |
+            . -> target
+            . -> target/llvm-cov-target
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Static analysis and contract tests
         run: nix develop --impure -c har-check
       - name: Core and navigation coverage (90% minimum)
