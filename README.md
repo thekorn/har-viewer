@@ -114,6 +114,15 @@ pointer input, including sorting, facets, response inspection and file-load reco
 fixing/upgrading the upstream chain. The build currently also reports an upstream
 future-compatibility warning in `proc-macro-error2`.
 
+Known dependency advisory: GPUI 0.2.2 pins Taffy 0.9.0, which pulls in Grid 0.18.0
+affected by [GHSA-38c5-483c-4qqp](https://github.com/advisories/GHSA-38c5-483c-4qqp)
+(moderate, integer overflow in `expand_rows`). Taffy 0.9.2 permits the fixed Grid
+1.0.1, but GPUI's exact pin prevents a lockfile-only upgrade. This app uses flex
+and absolute layout, and Taffy's inspected grid occupancy code does not call
+`expand_rows`; that is not a guarantee of safety. The dependency alert remains
+open pending an upstream-compatible fix. Static-analysis success does not mean
+the dependency graph is free of known advisories.
+
 ## Structure
 
 `src/har.rs` is the pure parsing/analysis/export layer; `src/session.rs` owns visible

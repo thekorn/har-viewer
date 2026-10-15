@@ -126,7 +126,11 @@ with (
             deadline = time.monotonic() + 5
             while True:
                 value = run("xclip", "-selection", "clipboard", "-o")
-                if expected is None or value == expected or time.monotonic() >= deadline:
+                if (
+                    expected is None
+                    or value == expected
+                    or time.monotonic() >= deadline
+                ):
                     return value
                 time.sleep(0.1)
 

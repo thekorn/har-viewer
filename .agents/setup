@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v nix >/dev/null && [[ -f "$HOME/.nix-profile/etc/profile.d/nix.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "$HOME/.nix-profile/etc/profile.d/nix.sh"
+fi
+if ! command -v nix >/dev/null; then
+  echo "Installing pinned Nix 2.35.3 (single-user orb bootstrap)"
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl --fail --silent --show-error --location \
+    https://releases.nixos.org/nix/nix-2.35.3/install -o "$installer"
+  echo "69d0fe8fba8fe88f94c98b09964691ac9950abc7ecbf2ba861dc0533cfd901e9  $installer" | sha256sum --check
+  bash "$installer" --no-daemon --yes
+  # shellcheck source=/dev/null
+  source "$HOME/.nix-profile/etc/profile.d/nix.sh"
+fi
+
+# Make Nix available in later noninteractive login shells as well as this setup.
+marker="# HAR Viewer Nix bootstrap"
+if ! grep -Fqx "$marker" "$HOME/.bash_profile" 2>/dev/null; then
+  cat >> "$HOME/.bash_profile" <<'PROFILE'
+
+# HAR Viewer Nix bootstrap
+if [ -f "$HOME/.nix-profile/etc/profile.d/nix.sh" ]; then
+  . "$HOME/.nix-profile/etc/profile.d/nix.sh"
+fi
+PROFILE
+fi
+mkdir -p "$HOME/.config/nix"
+if ! grep -Fqx 'extra-experimental-features = nix-command flakes' "$HOME/.config/nix/nix.conf" 2>/dev/null; then
+  printf '\nextra-experimental-features = nix-command flakes\n' >> "$HOME/.config/nix/nix.conf"
+fi
+
+# Explicit devenv entry preserves the complete environment in every noninteractive
+# invocation; AGENTS.md requires the same entry point for all subsequent work.
+echo "Preparing the pinned devenv environment and fetching locked Rust sources"
+nix develop --impure -c cargo fetch --locked

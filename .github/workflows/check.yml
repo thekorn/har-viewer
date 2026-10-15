@@ -1,0 +1,38 @@
+name: Check
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Static analysis and contract tests
+        run: nix develop --impure -c har-check
+      - name: Core and navigation coverage (90% minimum)
+        run: nix develop --impure -c har-coverage
+      - name: Build native app
+        run: nix develop --impure -c cargo build --locked
+      - name: Real desktop smoke test
+        run: nix develop --impure -c har-smoke
+      - name: Build and test distribution
+        run: nix develop --impure -c har-package
+      - name: Check packaged desktop app
+        run: >-
+          nix develop --impure -c env
+          -u LD_LIBRARY_PATH -u FONTCONFIG_FILE -u VK_DRIVER_FILES
+          HAR_VIEWER_SOFTWARE=1 python tests/desktop.py
+          --binary ./result/bin/har-viewer
