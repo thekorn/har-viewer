@@ -1,0 +1,47 @@
+[
+  {
+    "label": "HAR: run sample",
+    "command": "nix",
+    "args": ["develop", "--impure", "-c", "har-dev", "--sample"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "HAR: check",
+    "command": "nix",
+    "args": ["develop", "--impure", "-c", "har-check"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "HAR: test",
+    "command": "nix",
+    "args": ["develop", "--impure", "-c", "cargo", "test", "--locked"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "HAR: coverage",
+    "command": "nix",
+    "args": ["develop", "--impure", "-c", "har-coverage"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "HAR: release build",
+    "command": "nix",
+    "args": ["develop", "--impure", "-c", "har-build"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "HAR: package",
+    "command": "nix",
+    "args": ["develop", "--impure", "-c", "har-package"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "HAR: desktop smoke (Linux)",
+    "command": "nix",
+    "args": [
+      "develop", "--impure", "-c", "bash", "-c",
+      "'cargo build --locked && har-smoke --artifacts .amp/in/artifacts'"
+    ],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  }
+]
