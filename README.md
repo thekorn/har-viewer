@@ -181,34 +181,6 @@ and absolute layout, and Taffy's inspected grid occupancy code does not call
 open pending an upstream-compatible fix. Static-analysis success does not mean
 the dependency graph is free of known advisories.
 
-### Zed
-
-Open the repository root so Zed loads `.zed/settings.json` and `.zed/tasks.json`.
-Launch Zed from the development shell so its language servers inherit the pinned
-Rust toolchain and native build libraries (install Zed's CLI first):
-
-```sh
-nix develop --impure -c zed .
-```
-
-The settings enable Clippy diagnostics with the same warnings-as-errors policy as
-`har-check`, and format Rust, Nix and Python on save using the shell's `rustfmt`,
-`nixfmt` and Ruff. Formatters explicitly enter the flake shell; the first save may
-take longer while Nix prepares it. Generated build and environment directories are
-excluded from Zed's file scans; themes and keybindings remain personal preferences.
-
-Rust support is built into Zed, which manages rust-analyzer when it is not on PATH.
-Install Zed's **Nix** extension for Nix syntax support; Nix language-server features
-additionally need `nil` or `nixd` in your environment. No language-server packages
-are added to the development shell. Existing direnv users can run `direnv allow`;
-Zed's direct direnv integration is enabled, but launching from the shell also
-supplies the environment to Zed-managed language servers.
-
-Use **task: spawn** and search for **HAR:** to run the sample, checks, tests,
-coverage, release build, package build or Linux desktop smoke test. Every task runs
-from the repository root through `nix develop --impure`; the smoke task builds the
-debug binary first and writes evidence under `.amp/in/artifacts`.
-
 ## Structure
 
 `src/har.rs` is the pure parsing/analysis/export layer; `src/session.rs` owns visible
