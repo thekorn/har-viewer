@@ -7,15 +7,33 @@
   makeWrapper,
   ...
 }:
+let
+  appId = "dev.thekorn.har-viewer";
+  version = "0.1.0";
+  desktopItem = pkgs.makeDesktopItem {
+    name = appId;
+    desktopName = "HAR Viewer";
+    comment = "Inspect HTTP archives locally";
+    exec = "@out@/bin/har-viewer";
+    icon = appId;
+    terminal = false;
+    categories = [
+      "Development"
+      "Network"
+    ];
+    startupWMClass = appId;
+  };
+in
 rustPlatform.buildRustPackage {
   pname = "har-viewer";
-  version = "0.1.0";
+  inherit version;
   src = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [
       ../Cargo.toml
       ../Cargo.lock
       ../src
+      ../assets
       ../fixtures
       ../tests/cli.rs
       ../tests/har.rs
@@ -35,6 +53,27 @@ rustPlatform.buildRustPackage {
   postInstall = ''
     install -Dm644 LICENSE $out/share/licenses/har-viewer/LICENSE
     install -Dm644 THIRD_PARTY_NOTICES.md $out/share/licenses/har-viewer/THIRD_PARTY_NOTICES.md
+  ''
+  + lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+    install -Dm644 ${desktopItem}/share/applications/${appId}.desktop \
+      $out/share/applications/${appId}.desktop
+    substituteInPlace $out/share/applications/${appId}.desktop \
+      --replace-fail '@out@' "$out"
+    for icon in assets/icons/*.png; do
+      size=$(basename "$icon" .png)
+      install -Dm644 "$icon" "$out/share/icons/hicolor/''${size}x''${size}/apps/${appId}.png"
+    done
+    install -Dm644 assets/icon.svg $out/share/icons/hicolor/scalable/apps/${appId}.svg
+  ''
+  + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+    app="$out/Applications/HAR Viewer.app/Contents"
+    mkdir -p "$app/MacOS" "$app/Resources"
+    mv "$out/bin/har-viewer" "$app/MacOS/har-viewer"
+    substitute ${./Info.plist} "$app/Info.plist" \
+      --subst-var-by appId '${appId}' --subst-var-by version '${version}'
+    install -m644 assets/icon.icns "$app/Resources/har-viewer.icns"
+    # CLI launches must execute the bundled binary too, preserving bundle identity.
+    makeWrapper "$app/MacOS/har-viewer" "$out/bin/har-viewer"
   '';
   postFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
     wrapProgram $out/bin/har-viewer \

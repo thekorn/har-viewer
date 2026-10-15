@@ -61,8 +61,8 @@ in
       statix check .
       deadnix --fail flake.nix devenv.nix nix/
       actionlint
-      ruff check tests/*.py
-      ruff format --check tests/*.py
+      ruff check tests/*.py assets/*.py
+      ruff format --check tests/*.py assets/*.py
     '';
     har-build.exec = "cargo build --locked --release";
     har-package.exec = "nix build .#default --print-build-logs";

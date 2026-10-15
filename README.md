@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icons/256.png" width="128" height="128" alt="HAR Viewer waterfall icon">
+</p>
+
 # HAR Viewer
 
 A private, native HTTP archive inspector built with **Rust and GPUI**. Inspired by
@@ -50,6 +54,24 @@ On macOS, Nix supplies the SDK and bindgen toolchain; host Xcode is not required
 GPUI compiles embedded Metal shader source when the renderer starts, avoiding
 Xcode's proprietary build-time shader compiler. A Metal-capable GPU is required;
 `HAR_VIEWER_SOFTWARE` has no effect on macOS.
+
+### Desktop installation and icon
+
+The Nix package includes the Waterfall app icon. On Linux it installs a
+`dev.thekorn.har-viewer.desktop` launcher and hicolor PNG/SVG icons. Install the
+package through your NixOS/Home Manager configuration or `nix profile install .`
+from this checkout, with the profile's `share` directory in the desktop session's
+`XDG_DATA_DIRS`. A one-off `nix run` does not register a desktop launcher. GPUI
+supplies the matching X11 window class / Wayland app ID; desktop shells use it to
+find the icon. X11 window managers that require `_NET_WM_ICON` may still show a
+generic window icon because GPUI 0.2.2 does not set that property.
+
+On macOS, `nix develop --impure -c har-package` produces
+`result/Applications/HAR Viewer.app`, including its Finder/Dock icon. Launch with
+`open "result/Applications/HAR Viewer.app"`; expose the bundle in Applications
+through your Nix desktop integration for normal Finder access. The packaged CLI
+also executes the binary inside the bundle. Plain `cargo run` is unbundled and
+does not provide the macOS app icon.
 
 ## First iteration
 
@@ -187,6 +209,12 @@ selection and navigation. `src/app.rs` renders and coordinates native I/O;
 `src/input.rs` is the version-matched GPUI native input implementation. No network
 or filesystem operations live in the HAR model. Nix runtime libraries are shared
 between the devenv shell and distribution package.
+
+`assets/icon.svg` is the editable Waterfall artwork. The checked-in PNG sizes and
+macOS ICNS are generated from it, with transparent margins. Regenerate on Linux
+using `nix develop --impure -c python assets/generate.py`; no extra tools are needed.
+After `har-package`, run `nix develop --impure -c python tests/package.py` to check
+the packaged launcher/bundle, icon resources and headless CLI on either platform.
 
 ## License and credits
 

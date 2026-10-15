@@ -46,8 +46,8 @@ jobs:
         run: nix develop --impure -c har-smoke
       - name: Build and test distribution
         run: nix develop --impure -c har-package
-      - name: Check packaged CLI
-        run: ./result/bin/har-viewer --help
+      - name: Check packaged launcher, icons and CLI
+        run: nix develop --impure -c python tests/package.py
       - name: Check packaged desktop app
         run: >-
           nix develop --impure -c env
