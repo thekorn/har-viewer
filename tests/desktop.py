@@ -65,6 +65,8 @@ with (
                 display = subprocess.Popen(
                     [
                         "Xvfb",
+                        # Keep the owned server ready between app launches.
+                        "-noreset",
                         "-displayfd",
                         str(write_fd),
                         "-screen",
