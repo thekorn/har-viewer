@@ -5,7 +5,7 @@
 # HAR Viewer
 
 A native HTTP archive inspector built with **Rust, GPUI and
-[GPUI Component](https://gpui-kit.com)**, with the library's dark theme, faceted
+[GPUI Component](https://gpui-kit.com)**, with a Gruvbox Dark theme, faceted
 filters and a request inspector. This is a native application, not a browser wrapper.
 
 ## Run with Nix
@@ -13,15 +13,16 @@ filters and a request inspector. This is a native application, not a browser wra
 Enable Nix flakes, then run from a **macOS desktop** or a **Linux X11/Wayland desktop**:
 
 ```sh
-nix run github:thekorn/har-viewer
 nix run github:thekorn/har-viewer -- --input /path/to/capture.har
-nix run github:thekorn/har-viewer -- --sample
+# From this checkout, explore the fictional fixture:
+nix run . -- --input fixtures/sample.har
 ```
 
-`--input <har file>` loads that capture immediately on launch. Quote paths containing
-spaces. File paths on the command line require `--input`; positional paths are not
-accepted. Run without arguments to start without a capture, or use `--sample` for
-the bundled fixture. `--input` and `--sample` are mutually exclusive.
+`--input <har file>` is required and loads one capture at launch. Quote paths containing
+spaces. Positional paths and `--sample` are not accepted. The window shows only a
+loading screen while the capture is read and parsed. To inspect another file, quit
+and relaunch with a different `--input`; there is no file picker, path field or file
+drop support. A failed load shows an error with relaunch instructions.
 
 Packages and development shells are provided for Linux (x86_64 and aarch64) and
 Apple Silicon macOS (aarch64). macOS uses native Cocoa windows and Metal; it does
@@ -33,7 +34,7 @@ distributions, or machines without a usable Vulkan GPU, use the bundled software
 renderer (slower, but does not require a host GPU driver):
 
 ```sh
-HAR_VIEWER_SOFTWARE=1 nix run github:thekorn/har-viewer -- --sample
+HAR_VIEWER_SOFTWARE=1 nix run github:thekorn/har-viewer -- --input /path/to/capture.har
 ```
 
 ### Desktop installation and icon
@@ -49,15 +50,15 @@ generic window icon because GPUI 0.2.2 does not set that property.
 
 On macOS, `nix develop --impure -c har-package` produces
 `result/Applications/HAR Viewer.app`, including its Finder/Dock icon. Launch with
-`open "result/Applications/HAR Viewer.app"`; expose the bundle in Applications
-through your Nix desktop integration for normal Finder access. The packaged CLI
-also executes the binary inside the bundle. Plain `cargo run` is unbundled and
-does not provide the macOS app icon.
+`open -n "result/Applications/HAR Viewer.app" --args --input /path/to/capture.har`.
+The packaged CLI also executes the binary inside the bundle. Launching from Finder
+or a desktop menu without arguments cannot open a capture; use the CLI with `--input`.
+Plain `cargo run` is unbundled and does not provide the macOS app icon.
 
 ## First iteration
 
-- Open via command line, native file chooser, path input or file drop; bundled
-  fictional shopping capture for exploration. Parsing runs in the background.
+- Load via `--input` at startup; a fictional shopping capture lives in
+  `fixtures/sample.har` for exploration. Parsing runs in the background.
 - Virtualized component table; sort by method, URL, status, type, size or duration
   using each column's sort icon (descending, ascending, then capture-time order).
   All columns remain available with horizontal scrolling; close the inspector for
@@ -69,12 +70,11 @@ does not provide the macOS app icon.
   original entry JSON. Base64 text is decoded; binary content is identified.
 - Waterfall and request histogram, overview totals and per-domain distribution,
   local issue checks for errors, latency, large responses and uncached assets.
-- Copy URL, shell-quoted cURL, inspector content or filtered HAR. Save filtered HAR
-  to a **new** file without overwriting the original. Extensions/metadata survive export.
-- Native Unicode input, clipboard, keyboard navigation and recoverable load errors.
+- Copy URL, shell-quoted cURL or inspector content. No HAR export or HAR clipboard copy.
+- Native Unicode input, clipboard and keyboard navigation.
 
 No telemetry, uploads, replay or remote requests. HAR files often contain passwords,
-cookies and tokens: **exports and clipboard copies are NOT sanitized**. Review them
+cookies and tokens: **clipboard copies are NOT sanitized**. Review them
 before sharing. Resource sizes are decoded HAR content sizes, not wire transfer sizes;
 unknown sizes contribute zero to totals. Unknown timestamps do not extend capture time.
 
@@ -84,13 +84,11 @@ Use **Command (⌘)** instead of **Ctrl** on macOS. In-app hints follow the plat
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl O | Open a capture |
 | Ctrl F | Focus request search |
 | ↑ / ↓ | Previous / next visible request (outside text fields) |
-| Enter | Open the entered path, or return focus to the request list |
-| Escape | Dismiss open/error UI and return focus to the request list |
+| Enter | Return focus from search to the request list |
+| Escape | Return focus to the request list; dismiss inspection errors, not startup errors |
 | Ctrl Shift C | Copy selected URL |
-| Ctrl Shift E | Copy visible requests as HAR |
 | Ctrl Q | Quit |
 
 ### Deliberate limits
@@ -99,12 +97,12 @@ HAR-Files are limited to 1 GiB (1,073,741,824 bytes). Body previews show at most
 lines, 2,000 characters per line; **Copy content** retains the full value.
 Inspector source scrolls horizontally.
 Unpaired UTF-16 surrogate escapes in JSON string values are loaded as `�`, with a
-validation warning in Issues. Copies and exports contain these replacements, not
+validation warning in Issues. Clipboard copies contain these replacements, not
 the original code units; the source file is never modified. Unpaired surrogates
 in object keys are rejected to avoid merging distinct fields. Valid surrogate
 pairs and literal backslash-u text are preserved; other malformed JSON is rejected.
 Minimum window size is 1100 × 650. Captures are in memory only; nothing restores on restart.
-This is not feature parity with the reference: comparison, replay, sanitized exports,
+This is not feature parity with the reference: comparison, replay,
 image previews, JSON trees, regex/body search, saved views, notes/pins, resizing panels,
 light theme, websocket tooling and initiator trees remain future work.
 
@@ -119,7 +117,7 @@ inputs in `devenv.lock`, independently of `flake.lock`.
 
 ```sh
 nix develop --impure
-har-dev --sample
+har-dev --input fixtures/sample.har
 har-check       # rustfmt, Clippy -D warnings, Rust tests, nixfmt, statix, deadnix
 har-coverage    # domain + session coverage, minimum 90% lines (not a UI coverage claim)
 har-build      # release Cargo build
@@ -134,7 +132,7 @@ Build sandboxing is separate: it follows the Nix daemon's `sandbox` setting.
 In particular, do not treat a successful macOS package build as sandbox validation
 when sandboxing is disabled or the daemon rejects an untrusted override.
 Direnv users can run `direnv allow`. For software rendering during development:
-`har-software har-dev --sample` on Linux. On macOS, `har-software` simply runs its
+`har-software har-dev --input fixtures/sample.har` on Linux. On macOS, `har-software` simply runs its
 command with the native Metal renderer.
 
 ```sh
@@ -163,8 +161,10 @@ Linux-only. None of these automation permissions are needed for normal app use.
 Tests cover malformed/partial HAR, timezone offsets, timing arithmetic, unknown
 sizes, stable sorting, combined filters, Unicode search, base64 errors, metadata
 round trips, real shell argument quoting, and navigation after filtering. The
-desktop smoke test asserts clipboard and exported data through real keyboard and
-pointer input, including sorting, facets, response inspection and file-load recovery.
+desktop smoke test asserts request selection and clipboard data through real keyboard
+and pointer input, including sorting, facets, response inspection, the loading
+transition and the removed open/export shortcuts. With `--artifacts`, it also captures
+startup errors for visual review.
 
 CI builds and checks only Ubuntu 24.04 on x86_64, including Nix packages, the
 headless CLI contract, and debug and packaged desktop smoke tests. The matrix
@@ -195,7 +195,8 @@ the dependency graph is free of known advisories.
 
 ## Structure
 
-`src/har.rs` is the pure parsing/analysis/export layer; `src/session.rs` owns visible
+`src/har.rs` is the pure parsing/analysis/export layer (the library export API remains
+available, but is not exposed in the app); `src/session.rs` owns visible
 selection and navigation. `src/app.rs` composes library components and coordinates
 native I/O; `src/request_table.rs` adapts the session to the library's virtualized
 table. Buttons, inputs (including the read-only inspector editor), tabs, sidebar,
@@ -207,8 +208,9 @@ between the devenv shell and distribution package.
 GPUI Component and its embedded icon assets are pinned to **0.5.1**, the last stable
 release compatible with GPUI **0.2.2**. Current GPUI Kit releases require a different
 GPUI engine; upgrading them is not a drop-in dependency update. No webview or
-remote assets are used. The library's dark theme uses normal foreground text for
-table headers and alerts for readability; fonts use the platform defaults already
+remote assets are used. `assets/gruvbox-dark.json` defines the Gruvbox Dark component
+and editor colors; waterfall phases use the same palette. Table headers and alerts
+use normal foreground text for readability; fonts use the platform defaults already
 packaged by this project.
 
 `assets/icon.svg` is the editable Waterfall artwork. The checked-in PNG sizes and

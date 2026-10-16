@@ -6,29 +6,27 @@ use gpui::{
     App, Application, Bounds, Focusable, TitlebarOptions, WindowBounds, WindowOptions, prelude::*,
     px, size,
 };
-use gpui_component::{Root, Theme, ThemeMode};
+use gpui_component::{Root, Theme, ThemeConfig, ThemeMode};
 use gpui_component_assets::Assets;
 
-const USAGE: &str = "Usage: har-viewer [--input <har file> | --sample]";
+const USAGE: &str = "Usage: har-viewer --input <har file>";
 
 fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.first().is_some_and(|a| a == "--help" || a == "-h") {
         println!(
-            "HAR Viewer\n\n{USAGE}\n\nNative HAR inspector. Requires macOS with Metal, or a Linux X11/Wayland desktop with Vulkan.\n{0} O: open file · {0} F: search · Up/Down: navigate · {0} Q: quit",
+            "HAR Viewer\n\n{USAGE}\n\nNative HAR inspector. Requires macOS with Metal, or a Linux X11/Wayland desktop with Vulkan.\nCaptures can only be loaded at launch with --input.\n{0} F: search · Up/Down: navigate · {0} Q: quit",
             platform::PRIMARY_LABEL
         );
         return;
     }
     let input = match args.as_slice() {
-        [] => None,
-        [arg] if arg == "--sample" => Some(arg.clone()),
         [option, path]
             if option == "--input"
                 && !path.is_empty()
                 && !path.to_string_lossy().starts_with('-') =>
         {
-            Some(path.clone())
+            path.clone()
         }
         _ => {
             eprintln!("{USAGE}");
@@ -42,11 +40,14 @@ fn main() {
     }
     Application::new().with_assets(Assets).run(move |cx: &mut App| {
         gpui_component::init(cx);
+        let gruvbox: ThemeConfig =
+            serde_json::from_str(include_str!("../assets/gruvbox-dark.json"))
+                .expect("embedded Gruvbox Dark theme must be valid");
+        Theme::global_mut(cx).dark_theme = std::rc::Rc::new(gruvbox);
         Theme::change(ThemeMode::Dark, None, cx);
         let theme = Theme::global_mut(cx);
         theme.font_family = platform::UI_FONT.into();
         theme.mono_font_family = platform::MONO_FONT.into();
-        theme.table_head_foreground = theme.foreground;
         app::init(cx);
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
@@ -69,13 +70,7 @@ fn main() {
             |window, cx| {
                 let view = cx.new(|cx| {
                     let mut viewer = app::Viewer::new(window, cx);
-                    if let Some(arg) = &input {
-                        if arg == "--sample" {
-                            viewer.sample(cx);
-                        } else {
-                            viewer.load(arg.into(), cx);
-                        }
-                    }
+                    viewer.load((&input).into(), cx);
                     viewer
                 });
                 window.focus(&view.focus_handle(cx));

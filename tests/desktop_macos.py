@@ -192,7 +192,7 @@ class MacDesktop:
             "Desktop must accommodate requested content size"
         )
 
-    def key(self, keys):
+    def key(self, keys, repeat=1):
         if keys in ("ctrl+c", "ctrl+shift+c", "ctrl+shift+e"):
             self.prepare_copy()
         parts = keys.split("+")
@@ -204,9 +204,10 @@ class MacDesktop:
         action = (
             f"key code {codes[key]}" if key in codes else f"keystroke {json.dumps(key)}"
         )
-        self.script(
-            action + (" using {" + ", ".join(modifiers) + "}" if modifiers else "")
-        )
+        action += " using {" + ", ".join(modifiers) + "}" if modifiers else ""
+        if repeat > 1:
+            action = f"repeat {repeat} times\n{action}\ndelay 0.035\nend repeat"
+        self.script(action)
         time.sleep(0.25)
 
     def type_text(self, text):

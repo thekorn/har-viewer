@@ -2,7 +2,7 @@
 
 Linux owns its virtual display; macOS requires explicit real-desktop opt-in.
 Only the app launched by this script is targeted and terminated.
-Clipboard assertions exercise public keyboard/pointer behavior and exported HAR data.
+Clipboard assertions exercise public keyboard/pointer behavior and request inspection.
 """
 
 import argparse
@@ -34,7 +34,6 @@ if macos and args.record:
     )
 root = Path(__file__).resolve().parent.parent
 fixture = root / "fixtures/sample.har"
-original = json.loads(fixture.read_text())["log"]["entries"]
 artifacts = args.artifacts
 if artifacts:
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -93,7 +92,10 @@ with (
             os.environ.pop("WAYLAND_DISPLAY", None)
             os.environ["XDG_RUNTIME_DIR"] = temp
         startup_capture = json.loads(fixture.read_text())
-        startup_capture["log"]["comment"] = "Loaded from the --input file, not --sample"
+        startup_capture["log"]["entries"][0]["request"]["url"] = (
+            "https://shop.lantern.test/?source=cli"
+        )
+        original = startup_capture["log"]["entries"]
         startup_file = Path(temp) / "startup capture ü.har"
         startup_file.write_text(json.dumps(startup_capture))
 
@@ -142,10 +144,19 @@ with (
 
         app, window = launch("--input", str(startup_file))
 
-        def key(keys):
+        def key(keys, repeat=1):
             if desktop:
-                return desktop.key(keys)
-            run("xdotool", "key", "--clearmodifiers", keys)
+                return desktop.key(keys, repeat)
+            run(
+                "xdotool",
+                "key",
+                "--clearmodifiers",
+                "--repeat",
+                str(repeat),
+                "--delay",
+                "35",
+                keys,
+            )
             time.sleep(0.25)
 
         def type_text(text):
@@ -205,9 +216,50 @@ with (
                     return value
                 time.sleep(0.1)
 
-        def exported():
-            key("ctrl+shift+e")
-            return json.loads(clipboard())["log"]["entries"]
+        def selected_url():
+            key("ctrl+shift+c")
+            return clipboard()
+
+        def unchanged_clipboard(keys):
+            # Seed a sentinel so a removed/no-selection copy action cannot pass
+            # by returning stale request data. Read directly: the macOS adapter
+            # normally waits for a clipboard change, which must not happen here.
+            sentinel = "HAR smoke: no copy expected"
+            if desktop:
+                desktop.prepare_copy()
+                sentinel = run("/usr/bin/pbpaste")
+                key(keys)
+                assert run("/usr/bin/pbpaste") == sentinel
+            else:
+                subprocess.run(
+                    ["xclip", "-selection", "clipboard"],
+                    input=sentinel,
+                    text=True,
+                    check=True,
+                    timeout=15,
+                )
+                key(keys)
+                assert clipboard() == sentinel
+
+        def assert_visible(expected):
+            # Inspect the visible ordering through navigation and Copy URL,
+            # rather than retaining an export backdoor just for the test.
+            key("Escape")
+            if not expected:
+                unchanged_clipboard("ctrl+shift+c")
+                return
+            key("Up", repeat=len(original))
+            for index, entry in enumerate(expected):
+                if index:
+                    key("Down")
+                assert selected_url() == entry["request"]["url"], (
+                    f"Visible request {index} differs"
+                )
+            key("Down")
+            assert selected_url() == expected[-1]["request"]["url"], (
+                "Navigation must stop at the last visible request"
+            )
+            key("Up", repeat=len(expected))
 
         def search(text):
             key("ctrl+f")
@@ -231,10 +283,11 @@ with (
                     str(artifacts / f"{name}.png"),
                 )
 
-        key("ctrl+shift+e")
-        assert json.loads(clipboard()) == startup_capture, (
-            "--input must load the specified file and preserve all original data"
+        assert selected_url() == original[0]["request"]["url"], (
+            "--input must load the specified file, not a bundled sample"
         )
+        unchanged_clipboard("ctrl+shift+e")
+        key("ctrl+o")  # Removed shortcut must not steal focus into a path field.
         screenshot("requests")
         if artifacts and args.record:
             recorder = subprocess.Popen(
@@ -265,7 +318,7 @@ with (
             )
             processes.append(recorder)
         key("ctrl+shift+c")
-        assert clipboard() == "https://shop.lantern.test/"
+        assert clipboard() == original[0]["request"]["url"]
         key("Down")
         key("ctrl+shift+c")
         assert clipboard() == "https://cdn.lantern.test/assets/shop.css", (
@@ -273,7 +326,7 @@ with (
         )
         key("Up")
 
-        click(350, 348)  # Select a row through the component table.
+        click(350, 288)  # Select a row through the component table.
         key("Down")
         key("ctrl+shift+c")
         assert clipboard() == original[2]["request"]["url"], "Table keyboard selection"
@@ -287,52 +340,48 @@ with (
         key("Return")
 
         # Request search must remain reachable even while the library editor is focused.
-        click(1100, 350)
+        click(1100, 290)
         search("503")
         expected = [e for e in original if e["response"]["status"] == 503]
-        assert exported() == expected, "Native search must affect export"
+        assert_visible(expected)
         screenshot("search")
         search("no-such-request-98765")
-        assert exported() == [], "No results must not export hidden rows"
+        assert_visible([])
         screenshot("empty-filter")
         search("")
 
         # Independent facets combine AND (within-facet OR is covered in har.rs).
-        click(90, 230)
-        click(90, 494)
+        click(90, 170)
+        click(90, 434)
         expected = [
             e
             for e in original
             if e["response"]["status"] // 100 == 2 and e["request"]["method"] == "POST"
         ]
-        assert exported() == expected, "Status and method facets"
+        assert_visible(expected)
         screenshot("filtered")
-        click(183, 116)  # Reset
-        assert exported() == original
+        click(183, 56)  # Reset
+        assert_visible(original)
 
         click(20, 848)  # Slow-request checkbox remains independent of the facets.
-        assert exported() == [e for e in original if e["time"] >= 1000], "Slow filter"
+        assert_visible([e for e in original if e["time"] >= 1000])
         click(20, 848)
-        assert exported() == original
+        assert_visible(original)
 
         # Time sorting, then selection and response inspection.
         key("ctrl+shift+c")
-        selected_url = clipboard()
-        click(880, 267)  # Component sort icon: descending first.
-        assert exported() == sorted(original, key=lambda e: e["time"], reverse=True), (
-            "Descending time sort"
-        )
+        before_sort = clipboard()
+        click(880, 207)  # Component sort icon: descending first.
         key("ctrl+shift+c")
-        assert clipboard() == selected_url, "Sorting retains entry identity"
-        click(880, 267)
-        assert exported() == sorted(original, key=lambda e: e["time"]), (
-            "Ascending time sort"
-        )
-        click(880, 267)
-        assert exported() == original, "Third sort restores capture-time order"
+        assert clipboard() == before_sort, "Sorting retains entry identity"
+        assert_visible(sorted(original, key=lambda e: e["time"], reverse=True))
+        click(880, 207)
+        assert_visible(sorted(original, key=lambda e: e["time"]))
+        click(880, 207)
+        assert_visible(original)
         search("/v1/catalog?")
-        click(1163, 218)  # Response
-        click(1237, 252)  # Copy content
+        click(1163, 158)  # Response
+        click(1237, 192)  # Copy content
         expected_body = next(
             e["response"]["content"]["text"]
             for e in original
@@ -342,90 +391,61 @@ with (
             "Response copies actual body"
         )
         screenshot("response")
-        click(1382, 218)  # Raw entry, not the preview/editor state.
-        click(1237, 252)
+        click(1382, 158)  # Raw entry, not the preview/editor state.
+        click(1237, 192)
         catalog = next(e for e in original if "/v1/catalog?" in e["request"]["url"])
         assert json.loads(clipboard()) == catalog, "Raw copy preserves entry metadata"
         screenshot("raw")
         search("/v1/cart/coupon")
-        click(1080, 218)  # Payload
-        click(1237, 252)
+        click(1080, 158)  # Payload
+        click(1237, 192)
         coupon = next(e for e in original if "/v1/cart/coupon" in e["request"]["url"])
         assert json.loads(clipboard()) == json.loads(
             coupon["request"]["postData"]["text"]
         )
         screenshot("payload")
-        click(1115, 252)  # Copy cURL without executing the captured request.
+        click(1115, 192)  # Copy cURL without executing the captured request.
         curl = shlex.split(clipboard())
         assert curl[0] == "curl" and coupon["request"]["url"] in curl
         assert curl[curl.index("--request") + 1] == "POST"
         assert coupon["request"]["postData"]["text"] in curl, "cURL retains payload"
         search("https://shop.lantern.test/")
-        click(350, 307)  # First matching request owns the fictional response cookie.
-        click(1244, 218)
-        click(1237, 252)
+        click(350, 247)  # First matching request owns the fictional response cookie.
+        click(1244, 158)
+        click(1237, 192)
         assert '"demo_session"' in clipboard() and '"fictional"' in clipboard(), (
             "Cookies copy"
         )
         screenshot("cookies")
-        click(1320, 218)
-        click(1237, 252)
+        click(1320, 158)
+        click(1237, 192)
         assert "wait:" in clipboard(), "Timing content copy"
         screenshot("timing")
         search("")
-        click(135, 76)
+        click(135, 16)
         # Capture-time ascending and unsorted are equivalent; the timeline must
         # still be able to cycle back to descending after restoring that order.
         for descending in (True, False, True, False):
-            click(1190, 297)
-            assert exported() == sorted(
-                original, key=lambda e: e["startedDateTime"], reverse=descending
-            ), "Waterfall timeline sort must keep cycling"
+            click(1190, 237)
+            assert_visible(
+                sorted(original, key=lambda e: e["startedDateTime"], reverse=descending)
+            )
         screenshot("waterfall")
-        click(225, 76)
+        click(225, 16)
         screenshot("overview")
-        click(700, 655)  # Overview's component button, not the keyboard shortcut.
-        assert json.loads(clipboard())["log"]["entries"] == original, (
-            "Overview HAR copy"
-        )
-        click(305, 76)
+        unchanged_clipboard("ctrl+shift+e")
+        click(305, 16)
         screenshot("issues")
-        click(45, 76)
+        click(45, 16)
         if recorder:
             recorder.communicate(b"q", timeout=15)
             assert recorder.returncode == 0, "Recording failed"
 
-        # File I/O via the real native path input, including failure recovery.
-        key("ctrl+o")
-        time.sleep(0.8)
-        type_text(str(root / "Cargo.toml"))
-        key("ctrl+a")
-        key("ctrl+c")
-        copied_path = clipboard(str(root / "Cargo.toml"))
-        assert copied_path == str(root / "Cargo.toml"), "Path field accepts native text"
-        key("Return")
-        time.sleep(0.5)
-        screenshot("invalid-file")
-        key("Escape")
-        assert len(exported()) == 35, "Bad file must not discard previous capture"
-        key("ctrl+o")
-        time.sleep(0.8)
-        key("ctrl+a")
-        type_text(str(fixture))
-        key("ctrl+a")
-        key("ctrl+c")
-        assert clipboard(str(fixture)) == str(fixture), "Path replacement"
-        key("Return")
-        time.sleep(0.8)
-        key("Escape")
-        assert exported() == original, (
-            "Open path replaces capture and resets filters/sort"
-        )
-        click(1416, 116)  # Close inspector.
+        click(1416, 56)  # Close inspector.
         screenshot("full-table")
-        click(350, 307)  # Reopen the same selected entry, not only a different row.
-        exported()  # Replace clipboard with HAR so a missing button cannot pass.
-        click(1020, 252)
+        click(350, 247)  # Reopen the same selected entry, not only a different row.
+        unchanged_clipboard("ctrl+shift+e")
+        click(1020, 192)
         assert clipboard() == original[0]["request"]["url"], "Row reopens inspector"
         resize(1100, 650 if desktop else 700)
         screenshot("compact")
@@ -433,15 +453,34 @@ with (
         key("ctrl+q")
         assert app.wait(timeout=10) == 0
 
-        app, window = launch()
-        screenshot("welcome")
-        click(710, 576)  # Explore the bundled sample from the empty welcome screen.
-        assert exported() == original, "Welcome sample button"
+        # A FIFO holds startup in the real asynchronous read without a test-only
+        # delay in the app. Closing the writer transitions to the loaded screen.
+        pending = Path(temp) / "loading.har"
+        os.mkfifo(pending)
+        app, window = launch("--input", str(pending))
+        screenshot("loading")
+        with pending.open("w") as writer:
+            writer.write(startup_file.read_text())
+        time.sleep(1)
+        assert selected_url() == original[0]["request"]["url"]
         key("ctrl+q")
         assert app.wait(timeout=10) == 0
+
+        for name, path in [
+            ("invalid-file", root / "Cargo.toml"),
+            ("missing-file", Path(temp) / "missing.har"),
+        ]:
+            app, window = launch("--input", str(path))
+            screenshot(name)
+            key("Escape")  # Must not dismiss the error into a loading screen.
+            screenshot(f"{name}-after-escape")
+            key("ctrl+q")
+            assert app.wait(timeout=10) == 0
         print(
-            "PASS: native --input launch, clipboard, keyboard/input focus, search, empty state, facets, slow filter, sort cycle, inspector tabs/copies, file loading, error recovery, resize, welcome sample, quit"
+            "PASS: native --input launch, removed open/export shortcuts, clipboard, keyboard/input focus, search, empty state, facets, slow filter, sort cycle, inspector tabs/copies, loading transition, resize, quit"
         )
+        if artifacts:
+            print("Startup error screenshots require visual review.")
     except BaseException:
         if artifacts and window and app and app.poll() is None:
             try:

@@ -1,8 +1,8 @@
 use crate::platform::{PRIMARY_LABEL, PRIMARY_MODIFIER};
 use crate::request_table::Requests;
 use gpui::{
-    App, ClipboardItem, Context, Entity, ExternalPaths, FocusHandle, Focusable, KeyBinding,
-    PathPromptOptions, ScrollStrategy, Subscription, Window, actions, div, prelude::*, px, rgb,
+    App, ClipboardItem, Context, Entity, FocusHandle, Focusable, KeyBinding, ScrollStrategy,
+    Subscription, Window, actions, div, prelude::*, px, rgb,
 };
 use gpui_component::{
     ActiveTheme, IconName, Sizable,
@@ -18,6 +18,7 @@ use gpui_component::{
     progress::Progress,
     scroll::ScrollableElement,
     sidebar::{Sidebar, SidebarGroup, SidebarMenu, SidebarMenuItem},
+    spinner::Spinner,
     tab::{Tab as ComponentTab, TabBar},
     table::{Table, TableEvent, TableState},
     tag::Tag,
@@ -29,12 +30,7 @@ use har_viewer::{
 };
 use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
-actions!(
-    viewer,
-    [
-        Open, Search, Next, Previous, Escape, Submit, CopyUrl, CopyHar, Quit
-    ]
-);
+actions!(viewer, [Search, Next, Previous, Escape, CopyUrl, Quit]);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View {
@@ -77,18 +73,13 @@ enum Facet {
 pub struct Viewer {
     session: Entity<Option<Session>>,
     table: Entity<TableState<Requests>>,
-    filename: String,
     search: Entity<InputState>,
-    path: Entity<InputState>,
     detail: Entity<InputState>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
     view: View,
     tab: Tab,
     inspector: bool,
-    open_path: bool,
-    loading: bool,
-    load_generation: u64,
     error: Option<String>,
     notice: String,
     reset_search: bool,
@@ -96,7 +87,6 @@ pub struct Viewer {
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new(&format!("{PRIMARY_MODIFIER}-o"), Open, Some("Viewer")),
         KeyBinding::new(&format!("{PRIMARY_MODIFIER}-f"), Search, Some("Viewer")),
         // The editor's own Find action must not shadow request search.
         KeyBinding::new(
@@ -111,11 +101,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(
             &format!("{PRIMARY_MODIFIER}-shift-c"),
             CopyUrl,
-            Some("Viewer"),
-        ),
-        KeyBinding::new(
-            &format!("{PRIMARY_MODIFIER}-shift-e"),
-            CopyHar,
             Some("Viewer"),
         ),
         KeyBinding::new(&format!("{PRIMARY_MODIFIER}-q"), Quit, None),
@@ -136,7 +121,6 @@ impl Viewer {
             InputState::new(window, cx)
                 .placeholder(format!("Filter URL, method or status…  {PRIMARY_LABEL} F"))
         });
-        let path = cx.new(|cx| InputState::new(window, cx).placeholder("/path/to/capture.har"));
         let detail = cx.new(|cx| {
             InputState::new(window, cx)
                 .code_editor("json")
@@ -163,11 +147,6 @@ impl Viewer {
                     _ => {}
                 },
             ),
-            cx.subscribe_in(&path, window, |this, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.submit(&Submit, window, cx);
-                }
-            }),
             cx.observe_in(&session, window, |this, _, window, cx| {
                 this.sync_table(cx);
                 this.refresh_detail(window, cx);
@@ -206,18 +185,13 @@ impl Viewer {
         Self {
             session,
             table,
-            filename: String::new(),
             search,
-            path,
             detail,
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
             view: View::Requests,
             tab: Tab::Headers,
             inspector: true,
-            open_path: false,
-            loading: false,
-            load_generation: 0,
             error: None,
             notice: "Local only. No uploads, telemetry or replay.".into(),
             reset_search: false,
@@ -261,12 +235,7 @@ impl Viewer {
         cx.notify();
     }
 
-    pub fn sample(&mut self, cx: &mut Context<Self>) {
-        self.load_generation += 1;
-        self.install(Capture::sample(), "sample-shop.har".into(), cx);
-    }
-
-    fn install(&mut self, capture: Capture, filename: String, cx: &mut Context<Self>) {
+    fn install(&mut self, capture: Capture, cx: &mut Context<Self>) {
         self.notice = if capture.warnings.is_empty() {
             "Capture loaded · Everything stays on this device".into()
         } else {
@@ -279,9 +248,6 @@ impl Viewer {
             *session = Some(Session::new(capture));
             cx.notify();
         });
-        self.filename = filename;
-        self.loading = false;
-        self.open_path = false;
         self.error = None;
         self.set_view(View::Requests, cx);
         self.inspector = true;
@@ -291,15 +257,6 @@ impl Viewer {
     }
 
     pub fn load(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        self.loading = true;
-        self.error = None;
-        self.load_generation += 1;
-        let generation = self.load_generation;
-        let filename = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
         let task = cx.background_executor().spawn(async move {
             // Bound reads too, not just metadata: files can grow between stat and read.
             const LIMIT: u64 = 1024 * 1024 * 1024;
@@ -317,59 +274,16 @@ impl Viewer {
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
-            let _ = this.update(cx, |this, cx| {
-                if generation != this.load_generation {
-                    return;
-                }
-                this.loading = false;
-                match result {
-                    Ok(capture) => this.install(capture, filename, cx),
-                    Err(error) => {
-                        this.error = Some(error);
-                        cx.notify();
-                    }
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(capture) => this.install(capture, cx),
+                Err(error) => {
+                    this.error = Some(error);
+                    cx.notify();
                 }
             });
         })
         .detach();
         cx.notify();
-    }
-
-    fn open(&mut self, _: &Open, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_path = true;
-        self.path.update(cx, |input, cx| input.focus(window, cx));
-        cx.notify();
-    }
-
-    fn browse(&mut self, cx: &mut Context<Self>) {
-        let receiver = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some("Open HAR capture".into()),
-        });
-        cx.spawn(async move |this, cx| {
-            let result = receiver.await;
-            let _ = this.update(cx, |this, cx| {
-                match result {
-                    Ok(Ok(Some(paths))) => if let Some(path) = paths.into_iter().next() { this.load(path, cx); },
-                    Ok(Ok(None)) => {},
-                    _ => { this.error = Some("File picker unavailable. Enter a full path above instead (Linux requires an XDG desktop portal).".into()); }
-                }
-                cx.notify();
-            });
-        }).detach();
-    }
-
-    fn submit(&mut self, _: &Submit, window: &mut Window, cx: &mut Context<Self>) {
-        if self.open_path {
-            let path = self.path.read(cx).value().to_string();
-            if !path.is_empty() {
-                self.load(PathBuf::from(path), cx);
-            }
-        } else {
-            window.focus(&self.focus);
-        }
     }
 
     fn search_action(&mut self, _: &Search, window: &mut Window, cx: &mut Context<Self>) {
@@ -380,8 +294,10 @@ impl Viewer {
     }
 
     fn escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_path = false;
-        self.error = None;
+        // A failed startup cannot be dismissed into an endless loading screen.
+        if self.session.read(cx).is_some() {
+            self.error = None;
+        }
         window.focus(&self.focus);
         cx.notify();
     }
@@ -415,14 +331,6 @@ impl Viewer {
         if let Some(e) = self.selected(cx) {
             cx.write_to_clipboard(ClipboardItem::new_string(e.url.clone()));
             self.notice = "URL copied".into();
-            cx.notify();
-        }
-    }
-
-    fn copy_har(&mut self, _: &CopyHar, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(s) = self.session.read(cx) {
-            cx.write_to_clipboard(ClipboardItem::new_string(s.capture.export(&s.visible)));
-            self.notice = "HAR copied · Credentials are NOT redacted; review before sharing".into();
             cx.notify();
         }
     }
@@ -489,73 +397,6 @@ impl Viewer {
             }
         });
         self.scroll_top(cx);
-    }
-
-    fn export(&mut self, cx: &mut Context<Self>) {
-        let Some(s) = self.session.read(cx) else {
-            return;
-        };
-        let capture = s.capture.clone();
-        let indices = s.visible.clone();
-        let receiver = cx.prompt_for_new_path(
-            &std::env::current_dir().unwrap_or_default(),
-            Some("filtered.har"),
-        );
-        cx.spawn(async move |this, cx| {
-            let result = match receiver.await {
-                Ok(Ok(Some(path))) => {
-                    let task = cx.background_executor().spawn(async move {
-                        // Never silently overwrite an existing capture, even if a portal allows it.
-                        use std::io::Write;
-                        let data = capture.export(&indices);
-                        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)
-                            .map_err(|e| format!("Export failed (choose a new filename): {e}"))?;
-                        file.write_all(data.as_bytes()).map_err(|e| format!("Export failed: {e}"))
-                    });
-                    task.await.map(|()| "Exported visible requests. HAR includes credentials; review before sharing.".to_owned())
-                },
-                Ok(Ok(None)) => return,
-                _ => Err("Save dialog unavailable. Use Copy HAR in the Overview, then save from your editor.".into()),
-            };
-            let _ = this.update(cx, |this, cx| { match result { Ok(message) => this.notice = message, Err(error) => this.error = Some(error) }; cx.notify(); });
-        }).detach();
-    }
-
-    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .h(px(60.))
-            .px_4()
-            .gap_3()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(
-                div()
-                    .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child("HAR Viewer"),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_ellipsis()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(self.filename.clone()),
-            )
-            .child(Tag::success().child("Local only"))
-            .child(
-                Button::new("open")
-                    .label(format!("Open HAR  {PRIMARY_LABEL} O"))
-                    .icon(IconName::FolderOpen)
-                    .on_click(cx.listener(|this, _, window, cx| this.open(&Open, window, cx))),
-            )
-            .when(self.session.read(cx).is_some(), |d| {
-                d.child(
-                    Button::new("export")
-                        .label("Export HAR")
-                        .on_click(cx.listener(|this, _, _, cx| this.export(cx))),
-                )
-            })
     }
 
     fn navigation(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -927,54 +768,41 @@ impl Viewer {
             item.0 += 1;
             item.1 += e.size.unwrap_or(0);
         }
-        let content = v_flex()
-            .p_6()
-            .gap_5()
-            .child(div().text_2xl().child("Capture overview"))
-            .child(
-                div()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Metrics reflect the current filters."),
-            )
-            .child(
-                DescriptionList::vertical()
-                    .columns(4)
-                    .item("Requests", summary.requests.to_string(), 1)
-                    .item("Resource size", bytes(summary.bytes), 1)
-                    .item("Wall time", duration(summary.duration_ms), 1)
-                    .item("Errors", summary.errors.to_string(), 1),
-            )
-            .child(
-                GroupBox::new().outline().title("Requests by domain").child(
-                    v_flex()
-                        .gap_4()
-                        .children(domains.into_iter().map(|(host, (count, size))| {
-                            h_flex()
-                                .gap_4()
-                                .child(div().w(px(260.)).child(host))
-                                .child(div().flex_1().child(
-                                    Progress::new().value(
-                                        count as f32 / summary.requests.max(1) as f32 * 100.,
-                                    ),
-                                ))
-                                .child(div().w(px(110.)).child(format!("{count} requests")))
-                                .child(div().w(px(90.)).child(bytes(size)))
-                        })),
-                ),
-            )
-            .child(format!("Average request: {}", duration(summary.average_ms)))
-            .child(
-                Button::new("copy-har").label("Copy filtered HAR").on_click(
-                    cx.listener(|this, _, window, cx| this.copy_har(&CopyHar, window, cx)),
-                ),
-            )
-            .child(
-                Alert::warning(
-                    "export-warning",
-                    "Exports retain original headers, bodies and extension fields. Not sanitized.",
+        let content =
+            v_flex()
+                .p_6()
+                .gap_5()
+                .child(div().text_2xl().child("Capture overview"))
+                .child(
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Metrics reflect the current filters."),
                 )
-                .text_color(cx.theme().foreground),
-            );
+                .child(
+                    DescriptionList::vertical()
+                        .columns(4)
+                        .item("Requests", summary.requests.to_string(), 1)
+                        .item("Resource size", bytes(summary.bytes), 1)
+                        .item("Wall time", duration(summary.duration_ms), 1)
+                        .item("Errors", summary.errors.to_string(), 1),
+                )
+                .child(
+                    GroupBox::new().outline().title("Requests by domain").child(
+                        v_flex().gap_4().children(domains.into_iter().map(
+                            |(host, (count, size))| {
+                                h_flex()
+                                    .gap_4()
+                                    .child(div().w(px(260.)).child(host))
+                                    .child(div().flex_1().child(Progress::new().value(
+                                        count as f32 / summary.requests.max(1) as f32 * 100.,
+                                    )))
+                                    .child(div().w(px(110.)).child(format!("{count} requests")))
+                                    .child(div().w(px(90.)).child(bytes(size)))
+                            },
+                        )),
+                    ),
+                )
+                .child(format!("Average request: {}", duration(summary.average_ms)));
         div()
             .id("overview")
             .flex_1()
@@ -1016,45 +844,30 @@ impl Viewer {
             .overflow_y_scrollbar()
     }
 
-    fn welcome(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn startup(&self, cx: &App) -> impl IntoElement {
         v_flex()
             .flex_1()
             .items_center()
             .justify_center()
-            .gap_5()
-            .child(div().text_3xl().child("Inspect your HTTP archives"))
-            .child(
-                div()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("No account. No server. Nothing leaves your machine."),
-            )
-            .child(
-                div().w(px(560.)).child(
-                    GroupBox::new()
-                        .outline()
-                        .title("Drop a .har file here")
-                        .child(
-                        v_flex()
-                            .gap_4()
-                            .child(
-                                "Open a capture from your device, or explore the fictional sample.",
-                            )
-                            .child(
-                                Button::new("welcome-open")
-                                    .primary()
-                                    .label(format!("Open HAR file  {PRIMARY_LABEL} O"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.open(&Open, window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("sample")
-                                    .label("Explore a sample capture")
-                                    .on_click(cx.listener(|this, _, _, cx| this.sample(cx))),
-                            ),
+            .gap_4()
+            .when(self.error.is_none(), |d| {
+                d.child(Spinner::new().with_size(px(28.)).color(cx.theme().primary))
+                    .child("Loading capture…")
+            })
+            .when_some(self.error.clone(), |d, error| {
+                d.child(
+                    div().w(px(680.)).child(
+                        Alert::error("load-error", error)
+                            .title("Could not load capture")
+                            .text_color(cx.theme().foreground),
                     ),
-                ),
-            )
+                )
+                .child(
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Quit and relaunch with --input <har file>."),
+                )
+            })
     }
 }
 
@@ -1066,9 +879,8 @@ impl Render for Viewer {
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
         // Keep shortcuts reachable when a focused field leaves the dispatch tree.
-        if (!self.open_path && self.path.focus_handle(cx).is_focused(window))
-            || (!matches!(self.view, View::Requests | View::Waterfall)
-                && self.search.focus_handle(cx).is_focused(window))
+        if (!matches!(self.view, View::Requests | View::Waterfall)
+            && self.search.focus_handle(cx).is_focused(window))
             || ((!matches!(self.view, View::Requests | View::Waterfall)
                 || self
                     .session
@@ -1081,33 +893,78 @@ impl Render for Viewer {
         {
             window.focus(&self.focus);
         }
-        v_flex().size_full().bg(cx.theme().background).text_color(cx.theme().foreground).text_sm()
-            .key_context("Viewer").track_focus(&self.focus)
-            .on_action(cx.listener(Self::open)).on_action(cx.listener(Self::search_action))
-            .on_action(cx.listener(Self::next)).on_action(cx.listener(Self::previous))
-            .on_action(cx.listener(Self::escape)).on_action(cx.listener(Self::submit))
-            .on_action(cx.listener(Self::copy_url)).on_action(cx.listener(Self::copy_har))
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| { if let Some(path) = paths.paths().first() { this.load(path.clone(), cx); } }))
-            .child(self.header(cx))
-            .when(self.open_path, |d| d.child(h_flex().p_3().gap_3().border_b_1().border_color(cx.theme().border)
-                .child("Open file").child(div().flex_1().min_w_0().child(Input::new(&self.path)))
-                .child(Button::new("browse").label("Browse…").on_click(cx.listener(|this, _, _, cx| this.browse(cx))))
-                .child(Button::new("load-path").primary().label("Open ↵").on_click(cx.listener(|this, _, window, cx| this.submit(&Submit, window, cx))))
-                .child(Button::new("cancel-open").label("Cancel").on_click(cx.listener(|this, _, window, cx| this.escape(&Escape, window, cx))))))
-            .when_some(self.error.clone(), |d, error| d.child(Alert::error("load-error", error).banner().text_color(cx.theme().foreground)
-                .on_close(cx.listener(|this, _, _, cx| { this.error = None; cx.notify(); }))))
-            .when(self.loading, |d| d.child(Alert::info("loading", "Reading and parsing capture… You can keep inspecting the previous capture.").banner().text_color(cx.theme().foreground)))
-            .when(self.session.read(cx).is_none(), |d| d.child(self.welcome(cx)))
-            .when(self.session.read(cx).is_some(), |d| d.child(self.navigation(cx)).child(div().flex().flex_1().min_h_0()
+        let root = v_flex()
+            .size_full()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .text_sm()
+            .key_context("Viewer")
+            .track_focus(&self.focus)
+            .on_action(cx.listener(Self::search_action))
+            .on_action(cx.listener(Self::next))
+            .on_action(cx.listener(Self::previous))
+            .on_action(cx.listener(Self::escape))
+            .on_action(cx.listener(Self::copy_url));
+        if self.session.read(cx).is_none() {
+            return root.child(self.startup(cx)).into_any_element();
+        }
+        root.when_some(self.error.clone(), |d, error| {
+            d.child(
+                Alert::error("load-error", error)
+                    .banner()
+                    .text_color(cx.theme().foreground)
+                    .on_close(cx.listener(|this, _, _, cx| {
+                        this.error = None;
+                        cx.notify();
+                    })),
+            )
+        })
+        .child(self.navigation(cx))
+        .child(
+            div()
+                .flex()
+                .flex_1()
+                .min_h_0()
                 .child(self.sidebar(cx))
-                .when(matches!(self.view, View::Requests | View::Waterfall), |d| d.child(self.request_table(cx))
-                    .when(self.inspector && self.selected(cx).is_some() && self.view == View::Requests, |d| d.child(self.inspector(cx))))
+                .when(matches!(self.view, View::Requests | View::Waterfall), |d| {
+                    d.child(self.request_table(cx)).when(
+                        self.inspector
+                            && self.selected(cx).is_some()
+                            && self.view == View::Requests,
+                        |d| d.child(self.inspector(cx)),
+                    )
+                })
                 .when(self.view == View::Overview, |d| d.child(self.overview(cx)))
-                .when(self.view == View::Issues, |d| d.child(self.issues(cx)))))
-            .child(h_flex().h(px(32.)).flex_shrink_0().px_4().gap_4().border_t_1().border_color(cx.theme().border).text_xs()
-                .when_some(self.session.read(cx).as_ref(), |d, s| d.child(format!("{} / {} requests", s.visible.len(), s.capture.entries.len()))
-                    .child(format!("Resources {}", bytes(s.summary.bytes))).child(format!("Finish {}", duration(s.summary.duration_ms))))
-                .child(div().flex_1().min_w_0().text_ellipsis().text_color(cx.theme().muted_foreground).child(self.notice.clone())))
+                .when(self.view == View::Issues, |d| d.child(self.issues(cx))),
+        )
+        .child(
+            h_flex()
+                .h(px(32.))
+                .flex_shrink_0()
+                .px_4()
+                .gap_4()
+                .border_t_1()
+                .border_color(cx.theme().border)
+                .text_xs()
+                .when_some(self.session.read(cx).as_ref(), |d, s| {
+                    d.child(format!(
+                        "{} / {} requests",
+                        s.visible.len(),
+                        s.capture.entries.len()
+                    ))
+                    .child(format!("Resources {}", bytes(s.summary.bytes)))
+                    .child(format!("Finish {}", duration(s.summary.duration_ms)))
+                })
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_ellipsis()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(self.notice.clone()),
+                ),
+        )
+        .into_any_element()
     }
 }
 
@@ -1182,12 +1039,12 @@ pub(crate) fn duration(ms: f64) -> String {
 }
 pub(crate) fn phase_color(phase: &str) -> u32 {
     match phase {
-        "dns" => 0x63bba4,
-        "connect" => 0xe19d67,
-        "ssl" => 0xa399ff,
-        "send" => 0x8cc582,
-        "wait" => 0x639edc,
-        "receive" => 0xe4bc69,
-        _ => 0x656573,
+        "dns" => 0x8ec07c,
+        "connect" => 0xfe8019,
+        "ssl" => 0xd3869b,
+        "send" => 0xb8bb26,
+        "wait" => 0x83a598,
+        "receive" => 0xfabd2f,
+        _ => 0x928374,
     }
 }

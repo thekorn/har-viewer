@@ -7,6 +7,8 @@ fn help_and_invalid_arguments_do_not_require_a_desktop() {
     for (arguments, expected_status) in [
         (vec!["--help"], 0),
         (vec!["-h"], 0),
+        (vec![], 2),
+        (vec!["--sample"], 2),
         (vec!["--unknown"], 2),
         (vec!["fixtures/sample.har"], 2),
         (vec!["/tmp/capture.har"], 2),
@@ -40,8 +42,6 @@ fn help_and_invalid_arguments_do_not_require_a_desktop() {
 #[test]
 fn linux_launch_without_a_display_reports_an_actionable_error() {
     for arguments in [
-        vec![],
-        vec!["--sample"],
         vec!["--input", "fixtures/sample.har"],
         vec!["--input", "captures/my capture ü.har"],
     ] {

@@ -66,7 +66,7 @@ for command in commands:
         timeout=15,
         check=True,
     )
-    assert "Usage: har-viewer [--input <har file> | --sample]" in result.stdout
+    assert "Usage: har-viewer --input <har file>" in result.stdout
     result = subprocess.run(
         [*command, "--unknown"],
         env=environment,
