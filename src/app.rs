@@ -26,7 +26,7 @@ use gpui_component::{
 };
 use har_viewer::{
     har::{Capture, Entry},
-    session::Session,
+    session::{DomainSort, Session},
 };
 use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
@@ -79,6 +79,8 @@ pub struct Viewer {
     _subscriptions: Vec<Subscription>,
     view: View,
     tab: Tab,
+    domain_sort: DomainSort,
+    domain_descending: bool,
     inspector: bool,
     error: Option<String>,
     notice: String,
@@ -191,6 +193,8 @@ impl Viewer {
             _subscriptions: subscriptions,
             view: View::Requests,
             tab: Tab::Headers,
+            domain_sort: DomainSort::Host,
+            domain_descending: false,
             inspector: true,
             error: None,
             notice: "Local only. No uploads, telemetry or replay.".into(),
@@ -769,48 +773,77 @@ impl Viewer {
     fn overview(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let s = self.session.read(cx).as_ref().unwrap();
         let summary = &s.summary;
-        let mut domains = BTreeMap::<String, (usize, u64)>::new();
-        for &id in &s.visible {
-            let e = &s.capture.entries[id];
-            let item = domains.entry(e.host.clone()).or_default();
-            item.0 += 1;
-            item.1 += e.size.unwrap_or(0);
-        }
-        let content =
-            v_flex()
-                .p_6()
-                .gap_5()
-                .child(div().text_2xl().child("Capture overview"))
-                .child(
-                    div()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Metrics reflect the current filters."),
-                )
-                .child(
-                    DescriptionList::vertical()
-                        .columns(4)
-                        .item("Requests", summary.requests.to_string(), 1)
-                        .item("Resource size", bytes(summary.bytes), 1)
-                        .item("Wall time", duration(summary.duration_ms), 1)
-                        .item("Errors", summary.errors.to_string(), 1),
-                )
-                .child(
-                    GroupBox::new().outline().title("Requests by domain").child(
-                        v_flex().gap_4().children(domains.into_iter().map(
-                            |(host, (count, size))| {
-                                h_flex()
-                                    .gap_4()
-                                    .child(div().w(px(260.)).child(host))
-                                    .child(div().flex_1().child(Progress::new().value(
-                                        count as f32 / summary.requests.max(1) as f32 * 100.,
-                                    )))
-                                    .child(div().w(px(110.)).child(format!("{count} requests")))
-                                    .child(div().w(px(90.)).child(bytes(size)))
-                            },
-                        )),
-                    ),
-                )
-                .child(format!("Average request: {}", duration(summary.average_ms)));
+        let domains = s.domains(self.domain_sort, self.domain_descending);
+        let sort_controls = h_flex().gap_2().child("Sort by").children(
+            [
+                (DomainSort::Host, "Alphabetical"),
+                (DomainSort::Requests, "Requests"),
+                (DomainSort::Size, "Total size"),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (sort, label))| {
+                Button::new(("domain-sort", index))
+                    .small()
+                    .label(label)
+                    .when(self.domain_sort == sort, |button| {
+                        button.primary().icon(if self.domain_descending {
+                            IconName::ArrowDown
+                        } else {
+                            IconName::ArrowUp
+                        })
+                    })
+                    .tooltip("Click the active sort again to reverse its direction")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.domain_descending = if this.domain_sort == sort {
+                            !this.domain_descending
+                        } else {
+                            sort != DomainSort::Host
+                        };
+                        this.domain_sort = sort;
+                        cx.notify();
+                    }))
+            }),
+        );
+        let content = v_flex()
+            .p_6()
+            .gap_5()
+            .child(div().text_2xl().child("Capture overview"))
+            .child(
+                div()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Metrics reflect the current filters."),
+            )
+            .child(
+                DescriptionList::vertical()
+                    .columns(4)
+                    .item("Requests", summary.requests.to_string(), 1)
+                    .item("Resource size", bytes(summary.bytes), 1)
+                    .item("Wall time", duration(summary.duration_ms), 1)
+                    .item("Errors", summary.errors.to_string(), 1),
+            )
+            .child(
+                GroupBox::new().outline().title("Requests by domain").child(
+                    v_flex()
+                        .gap_4()
+                        .child(sort_controls)
+                        .children(domains.into_iter().map(|domain| {
+                            h_flex()
+                                .gap_4()
+                                .child(div().w(px(260.)).child(domain.host))
+                                .child(div().flex_1().child(Progress::new().value(
+                                    domain.requests as f32 / summary.requests.max(1) as f32 * 100.,
+                                )))
+                                .child(
+                                    div()
+                                        .w(px(110.))
+                                        .child(format!("{} requests", domain.requests)),
+                                )
+                                .child(div().w(px(90.)).child(bytes(domain.bytes)))
+                        })),
+                ),
+            )
+            .child(format!("Average request: {}", duration(summary.average_ms)));
         div()
             .id("overview")
             .flex_1()

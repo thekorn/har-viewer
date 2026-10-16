@@ -1,6 +1,20 @@
 //! Request navigation independent of the window system.
 use crate::har::{Capture, Filter, SortColumn, Summary};
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DomainSort {
+    Host,
+    Requests,
+    Size,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DomainSummary {
+    pub host: String,
+    pub requests: usize,
+    pub bytes: u64,
+}
 
 pub struct Session {
     pub capture: Arc<Capture>,
@@ -41,6 +55,34 @@ impl Session {
         self.descending = self.sort == column && !self.descending;
         self.sort = column;
         self.refresh();
+    }
+
+    /// Aggregate only visible requests. Equal metrics sort by host A–Z in either direction.
+    pub fn domains(&self, sort: DomainSort, descending: bool) -> Vec<DomainSummary> {
+        let mut domains = BTreeMap::<String, DomainSummary>::new();
+        for &id in &self.visible {
+            let entry = &self.capture.entries[id];
+            let domain = domains
+                .entry(entry.host.clone())
+                .or_insert_with(|| DomainSummary {
+                    host: entry.host.clone(),
+                    requests: 0,
+                    bytes: 0,
+                });
+            domain.requests += 1;
+            domain.bytes = domain.bytes.saturating_add(entry.size.unwrap_or(0));
+        }
+        let mut domains: Vec<_> = domains.into_values().collect();
+        domains.sort_by(|a, b| {
+            let order = match sort {
+                DomainSort::Host => a.host.cmp(&b.host),
+                DomainSort::Requests => a.requests.cmp(&b.requests),
+                DomainSort::Size => a.bytes.cmp(&b.bytes),
+            };
+            let order = if descending { order.reverse() } else { order };
+            order.then_with(|| a.host.cmp(&b.host))
+        });
+        domains
     }
 
     pub fn navigate(&mut self, delta: isize) -> Option<usize> {
