@@ -54,6 +54,90 @@ fn selection_and_export_respect_combined_filters_and_sort() {
 }
 
 #[test]
+fn histogram_selection_uses_filtered_table_order_and_exact_bucket_boundaries() {
+    let entries: Vec<_> = [
+        ("a", Some("1970-01-01T00:00:00.021Z"), 503),
+        ("b", Some("1970-01-01T00:00:00.019Z"), 200),
+        ("z", Some("1970-01-01T00:00:00.020Z"), 0),
+        ("end", Some("1970-01-01T00:00:00.630Z"), 200),
+        ("origin", Some("1970-01-01T00:00:00.000Z"), 200),
+        ("unknown", None, 404),
+    ]
+    .into_iter()
+    .map(|(path, start, status)| {
+        json!({
+            "startedDateTime": start,
+            "time": 0,
+            "request": { "url": format!("https://histogram.test/{path}") },
+            "response": { "status": status }
+        })
+    })
+    .collect();
+    let capture = Capture::parse(&json!({"log": {"entries": entries}}).to_string()).unwrap();
+    let mut s = Session::new(capture);
+    let counts: Vec<_> = s
+        .histogram()
+        .into_iter()
+        .enumerate()
+        .filter(|(_, bin)| bin.requests > 0)
+        .map(|(i, bin)| (i, bin.requests, bin.errors))
+        .collect();
+    assert_eq!(counts, [(0, 2, 1), (1, 1, 0), (2, 2, 2), (63, 1, 0)]);
+    assert_eq!(s.select_histogram_bin(2), Some(2));
+    assert_eq!(s.selected, Some(2)); // 20 ms precedes 21 ms, not HAR file order.
+    assert_eq!(s.select_histogram_bin(1), Some(1));
+    assert_eq!(s.selected, Some(1)); // 19 ms belongs to the preceding window.
+    assert_eq!(s.select_histogram_bin(63), Some(4));
+    assert_eq!(s.selected, Some(3)); // The capture endpoint remains selectable.
+    assert_eq!(s.select_histogram_bin(3), None);
+    assert_eq!(s.select_histogram_bin(64), None);
+    assert_eq!(s.selected, Some(3));
+
+    s.sort_by(SortColumn::Url);
+    assert_eq!(s.select_histogram_bin(2), Some(0));
+    assert_eq!(s.selected, Some(0));
+    s.sort_by(SortColumn::Url);
+    assert_eq!(s.select_histogram_bin(2), Some(0));
+    assert_eq!(s.selected, Some(2));
+    assert_eq!(s.select_histogram_bin(0), Some(1));
+    assert_eq!(s.selected, Some(5)); // Missing timestamps are selectable at zero.
+
+    s.filter.query = "/z".into();
+    s.refresh();
+    assert_eq!(s.histogram()[2].requests, 1); // Filtering must not rescale time.
+    assert_eq!(s.histogram()[0].requests, 0);
+    assert_eq!(s.select_histogram_bin(2), Some(0));
+    assert_eq!(s.selected, Some(2));
+    assert_eq!(s.visible, [2]); // Navigation never changes filters or ordering.
+    s.filter.query = "no-such-request".into();
+    s.refresh();
+    assert!(s.histogram().iter().all(|bin| bin.requests == 0));
+    assert_eq!(s.select_histogram_bin(2), None);
+    assert_eq!(s.selected, None);
+}
+
+#[test]
+fn histogram_handles_zero_duration_and_unknown_timestamps() {
+    for start in [None, Some("1970-01-01T00:00:00Z")] {
+        let capture = Capture::parse(
+            &json!({"log": {"entries": [{
+                "startedDateTime": start,
+                "time": 0,
+                "request": {"url": "https://histogram.test/"},
+                "response": {"status": 200}
+            }]}})
+            .to_string(),
+        )
+        .unwrap();
+        let mut s = Session::new(capture);
+        assert_eq!(s.histogram()[0].requests, 1);
+        assert!(s.histogram()[1..].iter().all(|bin| bin.requests == 0));
+        assert_eq!(s.select_histogram_bin(0), Some(0));
+        assert_eq!(s.selected, Some(0));
+    }
+}
+
+#[test]
 fn overview_domains_sort_filtered_totals_in_both_directions() {
     let entries: Vec<_> = [
         ("c.test", 3, 700),

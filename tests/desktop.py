@@ -220,6 +220,11 @@ with (
             key("ctrl+shift+c")
             return clipboard()
 
+        def click_histogram(index, full_width=False):
+            # 230 px sidebar, 12 px chart insets, optional 480 px inspector.
+            width = 1440 - 230 - 24 - (0 if full_width else 480)
+            click(round(242 + (index + 0.5) * width / 64), 150)
+
         def unchanged_clipboard(keys):
             # Seed a sentinel so a removed/no-selection copy action cannot pass
             # by returning stale request data. Read directly: the macOS adapter
@@ -317,6 +322,14 @@ with (
                 stderr=log,
             )
             processes.append(recorder)
+        # Late bars reveal off-screen rows; empty windows leave selection alone.
+        # The 6.8 s window contains checkout.css followed by checkout.js.
+        click_histogram(46)
+        assert selected_url() == original[31]["request"]["url"]
+        screenshot("histogram-requests")
+        click_histogram(3)
+        assert selected_url() == original[31]["request"]["url"]
+        click_histogram(0)
         key("ctrl+shift+c")
         assert clipboard() == original[0]["request"]["url"]
         key("Down")
@@ -391,6 +404,11 @@ with (
         key("ctrl+shift+c")
         assert clipboard() == before_sort, "Sorting retains entry identity"
         assert_visible(sorted(original, key=lambda e: e["time"], reverse=True))
+        click_histogram(46)
+        assert (
+            selected_url()
+            == max(original[31:33], key=lambda e: e["time"])["request"]["url"]
+        ), "Histogram selection respects table sorting"
         click(880, 207)
         assert_visible(sorted(original, key=lambda e: e["time"]))
         click(880, 207)
@@ -446,6 +464,23 @@ with (
             assert_visible(
                 sorted(original, key=lambda e: e["startedDateTime"], reverse=descending)
             )
+            click_histogram(46, full_width=True)
+            assert (
+                selected_url() == original[32 if descending else 31]["request"]["url"]
+            )
+        screenshot("histogram-waterfall")
+        click(45, 16)
+        assert selected_url() == original[31]["request"]["url"], (
+            "Selection survives switching from Waterfall to Requests"
+        )
+        search("checkout.js")
+        click_histogram(46)
+        assert selected_url() == original[32]["request"]["url"], (
+            "Histogram selection respects filters without rescaling time"
+        )
+        search("")
+        click(135, 16)
+        click_histogram(0, full_width=True)
         screenshot("waterfall")
         click(225, 16)
         screenshot("overview")
@@ -493,7 +528,7 @@ with (
             key("ctrl+q")
             assert app.wait(timeout=10) == 0
         print(
-            "PASS: native --input launch, removed open/export shortcuts, clipboard, keyboard/input focus, search, empty state, facets, slow filter, sort cycle, inspector tabs/copies, loading transition, resize, quit"
+            "PASS: native --input launch, removed open/export shortcuts, clipboard, keyboard/input focus, search, empty state, facets, slow filter, sort cycle, histogram navigation in both views, inspector tabs/copies, loading transition, resize, quit"
         )
         if artifacts:
             print("Startup error screenshots require visual review.")

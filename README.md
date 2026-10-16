@@ -70,6 +70,8 @@ Plain `cargo run` is unbundled and does not provide the macOS app icon.
   original entry JSON. Base64 text is decoded; binary content is identified.
 - Waterfall and request histogram, overview totals and per-domain distribution,
   local issue checks for errors, latency, large responses and uncached assets.
+  Click a histogram bar in Requests or Waterfall to select and reveal the first
+  matching row in the current filtered/sorted table; empty windows do nothing.
 - Copy URL, shell-quoted cURL or inspector content. No HAR export or HAR clipboard copy.
 - Native Unicode input, clipboard and keyboard navigation.
 

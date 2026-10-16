@@ -16,6 +16,13 @@ pub struct DomainSummary {
     pub bytes: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HistogramBin {
+    pub requests: u32,
+    pub errors: u32,
+    first_row: Option<usize>,
+}
+
 pub struct Session {
     pub capture: Arc<Capture>,
     pub filter: Filter,
@@ -55,6 +62,38 @@ impl Session {
         self.descending = self.sort == column && !self.descending;
         self.sort = column;
         self.refresh();
+    }
+
+    /// Fixed capture-wide buckets, with missing timestamps displayed at zero.
+    pub fn histogram(&self) -> [HistogramBin; 64] {
+        let mut bins = [HistogramBin::default(); 64];
+        let start = self
+            .capture
+            .entries
+            .iter()
+            .filter_map(|e| e.start_ms)
+            .fold(f64::INFINITY, f64::min);
+        let span = self.capture.duration_ms().max(1.);
+        for (row, &id) in self.visible.iter().enumerate() {
+            let entry = &self.capture.entries[id];
+            let offset = entry.start_ms.map(|t| (t - start).max(0.)).unwrap_or(0.);
+            let index = ((offset / span * (bins.len() - 1) as f64) as usize).min(bins.len() - 1);
+            let bin = &mut bins[index];
+            bin.requests += 1;
+            if entry.status == 0 || entry.status >= 400 {
+                bin.errors += 1;
+            }
+            bin.first_row.get_or_insert(row);
+        }
+        bins
+    }
+
+    /// Select the first matching row in the current table order, without filtering.
+    /// Empty or invalid buckets leave selection unchanged.
+    pub fn select_histogram_bin(&mut self, index: usize) -> Option<usize> {
+        let row = self.histogram().get(index)?.first_row?;
+        self.selected = Some(self.visible[row]);
+        Some(row)
     }
 
     /// Aggregate only visible requests. Equal metrics sort by host A–Z in either direction.

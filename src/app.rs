@@ -15,6 +15,7 @@ use gpui_component::{
     h_flex,
     input::{Input, InputEvent, InputState},
     list::ListItem,
+    plot::AXIS_GAP,
     progress::Progress,
     scroll::ScrollableElement,
     sidebar::{Sidebar, SidebarGroup, SidebarMenu, SidebarMenuItem},
@@ -506,25 +507,26 @@ impl Viewer {
             )
     }
 
-    fn histogram(&self, cx: &App) -> impl IntoElement {
-        let s = self.session.read(cx).as_ref().unwrap();
-        let mut bins = [(0u32, 0u32); 64];
-        let start = s
-            .capture
-            .entries
-            .iter()
-            .filter_map(|e| e.start_ms)
-            .fold(f64::INFINITY, f64::min);
-        let span = s.capture.duration_ms().max(1.);
-        for &i in &s.visible {
-            let e = &s.capture.entries[i];
-            let bin =
-                (((e.start_ms.unwrap_or(start) - start) / span * 63.).max(0.) as usize).min(63);
-            bins[bin].0 += 1;
-            if e.status == 0 || e.status >= 400 {
-                bins[bin].1 += 1;
-            }
+    fn select_histogram_bin(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let row = self.session.update(cx, |session, cx| {
+            let row = session.as_mut()?.select_histogram_bin(index)?;
+            cx.notify();
+            Some(row)
+        });
+        if let Some(row) = row {
+            // Re-select even the same row to reveal it if it was scrolled away.
+            self.table
+                .update(cx, |table, cx| table.set_selected_row(row, cx));
+            self.inspector = true;
+            window.focus(&self.focus);
+            cx.notify();
         }
+    }
+
+    fn histogram(&self, cx: &Context<Self>) -> impl IntoElement {
+        let s = self.session.read(cx).as_ref().unwrap();
+        let bins = s.histogram();
+        let span = s.capture.duration_ms().max(1.);
         let normal = cx.theme().chart_1;
         let error = cx.theme().danger;
         v_flex()
@@ -542,13 +544,34 @@ impl Viewer {
                     .child(format!("0 — {}", duration(span))),
             )
             .child(
-                div().h(px(64.)).child(
-                    BarChart::new(bins.into_iter().enumerate().collect::<Vec<_>>())
-                        .x(|(i, _)| i.to_string())
-                        .y(|(_, (count, _))| f64::from(*count))
-                        .tick_margin(64)
-                        .fill(move |(_, (_, errors))| if *errors > 0 { error } else { normal }),
-                ),
+                div()
+                    .relative()
+                    .h(px(64.))
+                    .child(
+                        BarChart::new(bins.into_iter().enumerate().collect::<Vec<_>>())
+                            .x(|(i, _)| i.to_string())
+                            .y(|(_, bin)| f64::from(bin.requests))
+                            .tick_margin(bins.len())
+                            .fill(move |(_, bin)| if bin.errors > 0 { error } else { normal }),
+                    )
+                    // BarChart paints its bars without input handlers. Each bar lies
+                    // inside one equal-width slot; exclude the axis from hit targets.
+                    .child(h_flex().absolute().inset_0().bottom(px(AXIS_GAP)).children(
+                        bins.into_iter().enumerate().map(|(index, bin)| {
+                            div()
+                                .id(("histogram-bin", index))
+                                .flex_1()
+                                .min_w_0()
+                                .h_full()
+                                .when(bin.requests > 0, |d| {
+                                    d.cursor_pointer().on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            this.select_histogram_bin(index, window, cx);
+                                        },
+                                    ))
+                                })
+                        }),
+                    )),
             )
     }
 
