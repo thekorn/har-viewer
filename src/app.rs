@@ -121,8 +121,9 @@ impl Viewer {
                 .col_movable(false)
         });
         let search = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder(format!("Filter URL, method or status…  {PRIMARY_LABEL} F"))
+            InputState::new(window, cx).placeholder(format!(
+                "Filter…  text:phrase for fulltext  {PRIMARY_LABEL} F"
+            ))
         });
         let detail = cx.new(|cx| {
             InputState::new(window, cx)
@@ -600,6 +601,22 @@ impl Viewer {
                             .flex_1()
                             .min_w_0()
                             .child(Input::new(&self.search).small()),
+                    )
+                    .child(
+                        Button::new("search-help")
+                            .small()
+                            .ghost()
+                            .label("?")
+                            .tooltip(concat!(
+                                "Search syntax (case-insensitive)\n",
+                                "Bare text: URL, method or status\n",
+                                "text:coupon — full request + response\n",
+                                "request:SPRING — request fields + body\n",
+                                "response:\"coupon expired\" — response only\n",
+                                "Spaces = AND; quotes = phrase; - = exclude\n",
+                                "POST text:coupon -response:expired\n",
+                                "Includes headers, cookies and decoded text bodies"
+                            )),
                     )
                     .child(
                         div()

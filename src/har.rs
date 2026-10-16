@@ -1,6 +1,7 @@
+use crate::search::Query;
 use base64::Engine;
 use serde_json::Value;
-use std::{cmp::Ordering, collections::BTreeSet};
+use std::{borrow::Cow, cmp::Ordering, collections::BTreeSet};
 
 #[derive(Clone, Debug)]
 pub struct Capture {
@@ -27,6 +28,8 @@ pub struct Entry {
 
 #[derive(Default, Clone, Debug)]
 pub struct Filter {
+    /// ANDed literal terms; text:/request:/response: expand the default URL/method/status scope.
+    /// Double quotes group phrases; a leading minus excludes a term. Matching ignores case.
     pub query: String,
     /// HTTP status classes, 0 (failed) through 5.
     pub statuses: BTreeSet<u16>,
@@ -358,21 +361,18 @@ impl Capture {
 
     /// Returns vector indices, not original HAR ids. Unknown sizes/starts sort last in either direction.
     pub fn filtered(&self, filter: &Filter, column: SortColumn, descending: bool) -> Vec<usize> {
-        let q = filter.query.to_lowercase();
+        let query = Query::parse(&filter.query);
         let mut indices: Vec<_> = self
             .entries
             .iter()
             .enumerate()
             .filter(|(_, e)| {
-                (q.is_empty()
-                    || e.url.to_lowercase().contains(&q)
-                    || e.method.to_lowercase().contains(&q)
-                    || e.status.to_string().contains(&q))
-                    && (filter.statuses.is_empty() || filter.statuses.contains(&(e.status / 100)))
+                (filter.statuses.is_empty() || filter.statuses.contains(&(e.status / 100)))
                     && (filter.methods.is_empty() || filter.methods.contains(&e.method))
                     && (filter.kinds.is_empty() || filter.kinds.contains(&e.kind))
                     && (filter.hosts.is_empty() || filter.hosts.contains(&e.host))
                     && (!filter.slow_only || e.duration_ms >= 1000.0)
+                    && query.matches(e)
             })
             .map(|(i, _)| i)
             .collect();
@@ -460,38 +460,42 @@ impl Entry {
     }
 
     pub fn body(&self, response: bool) -> Result<String, String> {
+        let s = self.body_text(response)?;
+        Ok(serde_json::from_str::<Value>(&s)
+            .ok()
+            .and_then(|v| serde_json::to_string_pretty(&v).ok())
+            .unwrap_or_else(|| s.into_owned()))
+    }
+
+    /// Decode once without formatting, so literal search keeps the captured whitespace.
+    pub(crate) fn body_text(&self, response: bool) -> Result<Cow<'_, str>, String> {
         let body = if response {
             &self.raw["response"]["content"]
         } else {
             &self.raw["request"]["postData"]
         };
         let Some(value) = body.get("text") else {
-            return Ok(String::new());
+            return Ok(Cow::Borrowed(""));
         };
         let s = value.as_str().ok_or("Body text is not a string")?;
-        let decoded;
         let s = match body.get("encoding").and_then(Value::as_str) {
             Some("base64") => {
                 let bytes = base64::engine::general_purpose::STANDARD
                     .decode(s)
                     .map_err(|_| "Invalid base64 body")?;
-                decoded = String::from_utf8(bytes).map_err(|_| "Binary body (not UTF-8 text)")?;
-                &decoded
+                Cow::Owned(String::from_utf8(bytes).map_err(|_| "Binary body (not UTF-8 text)")?)
             }
             Some(encoding) if !encoding.is_empty() => {
                 return Err(format!("Unsupported body encoding: {encoding}"));
             }
-            _ => s,
+            _ => Cow::Borrowed(s),
         };
         if s.chars()
             .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
         {
             return Err("Binary body (contains control bytes)".into());
         }
-        Ok(serde_json::from_str::<Value>(s)
-            .ok()
-            .and_then(|v| serde_json::to_string_pretty(&v).ok())
-            .unwrap_or_else(|| s.to_owned()))
+        Ok(s)
     }
 
     pub fn phases(&self) -> Vec<Phase> {

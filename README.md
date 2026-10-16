@@ -63,8 +63,9 @@ Plain `cargo run` is unbundled and does not provide the macOS app icon.
   using each column's sort icon (descending, ascending, then capture-time order).
   All columns remain available with horizontal scrolling; close the inspector for
   more table space.
-- Case-insensitive URL/method/status search; status, method, resource type and
-  domain filters; slow-request preset. Choices within a facet are OR, facets AND.
+- Case-insensitive URL/method/status and fulltext request/response search; status,
+  method, resource type and domain filters; slow-request preset. Choices within a
+  facet are OR, facets AND.
   Sidebar counts describe the whole capture; table and overview reflect filters.
 - Headers, request payload, JSON/text response, cookies, additive timing phases and
   original entry JSON. Base64 text is decoded; binary content is identified.
@@ -81,6 +82,37 @@ No telemetry, uploads, replay or remote requests. HAR files often contain passwo
 cookies and tokens: **clipboard copies are NOT sanitized**. Review them
 before sharing. Resource sizes are decoded HAR content sizes, not wire transfer sizes;
 unknown sizes contribute zero to totals. Unknown timestamps do not extend capture time.
+
+### Search syntax
+
+Use the same search bar for quick filters and fulltext search. Hover **?** beside
+it for examples. Searches are case-insensitive literal substrings, not regex.
+
+| Query | Matches |
+| --- | --- |
+| `checkout` or `503` | URL, method or status, as before |
+| `text:coupon` | Any captured request or response field, including text bodies |
+| `request:SPRING-DEMO` | Request fields only, including payload |
+| `response:"Amber reading lamp"` | An exact phrase in response fields or body |
+| `POST text:coupon -response:expired` | All three conditions: POST metadata, coupon anywhere, no expired in the response |
+
+Whitespace separates terms joined with **AND**; each term may match a different
+field of the same entry. Quote text containing spaces to search it as one phrase.
+Prefix any term with `-` to exclude it. Sidebar facets still combine with the query
+using AND. Prefixes are case-insensitive; only `text:`, `request:` and `response:`
+are special, so URLs with colons work without quoting. Quote an entire token to
+search a literal prefix or leading minus: `"text:example"` or `"-draft"`.
+Inside quotes, `\"` and `\\` represent a literal quote and backslash; other
+backslashes stay literal. While typing, empty terms are ignored and an unclosed
+quote extends to the end of the query.
+
+Fulltext covers field names and values under each entry's `request` and `response`:
+URLs, headers, cookies, query/form parameters, status text, MIME types, extension
+fields and complete textual bodies, including base64-decoded UTF-8. It searches
+the captured body text without JSON reformatting or preview truncation. Binary,
+invalid-base64 and unsupported-encoding bodies are skipped, but their other fields
+remain searchable. Entry-level timings/comments and capture metadata are outside
+these scopes. Searches run locally and never fetch missing bodies or captured URLs.
 
 ### Shortcuts
 
@@ -107,7 +139,7 @@ in object keys are rejected to avoid merging distinct fields. Valid surrogate
 pairs and literal backslash-u text are preserved; other malformed JSON is rejected.
 Minimum window size is 1100 × 650. Captures are in memory only; nothing restores on restart.
 This is not feature parity with the reference: comparison, replay,
-image previews, JSON trees, regex/body search, saved views, notes/pins, resizing panels,
+image previews, JSON trees, regex search, saved views, notes/pins, resizing panels,
 light theme, websocket tooling and initiator trees remain future work.
 
 ## Development: everything in devenv
@@ -200,7 +232,8 @@ the dependency graph is free of known advisories.
 ## Structure
 
 `src/har.rs` is the pure parsing/analysis/export layer (the library export API remains
-available, but is not exposed in the app); `src/session.rs` owns visible
+available, but is not exposed in the app); `src/search.rs` parses and matches search
+terms without UI dependencies; `src/session.rs` owns visible
 selection and navigation. `src/app.rs` composes library components and coordinates
 native I/O; `src/request_table.rs` adapts the session to the library's virtualized
 table. Buttons, inputs (including the read-only inspector editor), tabs, sidebar,

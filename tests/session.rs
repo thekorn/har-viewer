@@ -29,6 +29,21 @@ fn selection_follows_visible_results_not_old_row_positions() {
     assert_eq!(s.selected, s.visible.first().copied());
     assert_eq!(s.navigate(-100), Some(0));
     assert_eq!(s.navigate(100), Some(34));
+
+    s.filter.query = "response:\"Amber reading lamp\"".into();
+    s.refresh();
+    assert_eq!(s.visible, [5, 15]);
+    assert_eq!(s.selected, Some(5));
+    assert_eq!(s.summary.requests, 2);
+    assert_eq!(s.navigate(1), Some(1));
+    assert_eq!(s.selected, Some(15));
+    s.sort_by(SortColumn::Url);
+    assert_eq!(s.selected, Some(15));
+    s.filter.query = "request:SPRING-DEMO response:coupon_expired".into();
+    s.refresh();
+    assert_eq!(s.visible, [24]);
+    assert_eq!(s.selected, Some(24));
+    assert_eq!(s.summary.errors, 1);
 }
 
 #[test]

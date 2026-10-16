@@ -97,6 +97,173 @@ fn filters_and_dimensions_or_within_and_unicode_query() {
 }
 
 #[test]
+fn fulltext_scopes_cover_request_and_response_fields_and_combine_with_facets() {
+    let mut a = entry("https://a.test/checkout", 422, 12, 1500.0);
+    a["request"]["method"] = json!("POST");
+    a["request"]["headers"] = json!([{"name":"X-Trace","value":"request-marker"}]);
+    a["request"]["cookies"] = json!([{"name":"session","value":"cookie-marker"}]);
+    a["request"]["queryString"] = json!([{"name":"q","value":"query-marker"}]);
+    a["request"]["postData"] = json!({"text":"{\"code\":\"ÄPFEL\"}",
+        "params":[{"name":"upload","value":"form-marker","fileName":"receipt.csv"}]});
+    a["response"]["headers"] = json!([{"name":"X-Result","value":"response-marker"}]);
+    a["response"]["cookies"] = json!([{"name":"result","value":"response-cookie"}]);
+    a["response"]["statusText"] = json!("Unprocessable Content");
+    a["response"]["redirectURL"] = json!("https://redirect.test/destination");
+    a["response"]["content"]["text"] = json!("coupon expired");
+    a["response"]["_custom"] = json!({"nested":["extension-marker",true,9876]});
+    a["comment"] = json!("outside-marker");
+    let mut b = entry("https://b.test/checkout", 200, 5, 999.0);
+    b["request"]["postData"] = json!({"text":"coupon expired"});
+    b["response"]["content"]["text"] = json!("request-marker");
+    let c = capture(vec![a, b]);
+    for (query, expected) in [
+        ("coupon", vec![]), // Bare text keeps the quick metadata search.
+        ("text:coupon", vec![0, 1]),
+        ("request:coupon", vec![1]),
+        ("response:coupon", vec![0]),
+        ("REQUEST:äpfel", vec![0]),
+        ("request:request-marker", vec![0]),
+        ("response:request-marker", vec![1]),
+        ("request:x-trace", vec![0]),
+        ("request:cookie-marker", vec![0]),
+        ("request:query-marker", vec![0]),
+        ("request:form-marker", vec![0]),
+        ("request:receipt.csv", vec![0]),
+        ("response:response-cookie", vec![0]),
+        ("response:response-marker", vec![0]),
+        ("response:\"unprocessable content\"", vec![0]),
+        ("response:redirect.test", vec![0]),
+        ("response:application/json", vec![0, 1]),
+        ("text:extension-marker", vec![0]),
+        ("text:_custom", vec![0]),
+        ("text:true", vec![0]),
+        ("text:9876", vec![0]),
+        ("text:outside-marker", vec![]),
+        ("POST text:coupon -response:request-marker", vec![0]),
+        ("request:request-marker response:request-marker", vec![]),
+        ("-text:coupon", vec![]),
+    ] {
+        let f = Filter {
+            query: query.into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            c.filtered(&f, SortColumn::Start, false),
+            expected,
+            "{query}"
+        );
+    }
+    let mut f = Filter {
+        query: "text:coupon".into(),
+        statuses: [2, 4].into(),
+        methods: ["POST".into()].into(),
+        kinds: ["json".into()].into(),
+        hosts: ["a.test".into()].into(),
+        slow_only: true,
+    };
+    assert_eq!(c.filtered(&f, SortColumn::Duration, true), [0]);
+    f.statuses = [2].into();
+    assert!(c.filtered(&f, SortColumn::Start, false).is_empty());
+}
+
+#[test]
+fn search_phrases_escaping_literals_and_incomplete_input() {
+    let mut a = entry("https://a.test:8443/error:code", 200, 0, 0.0);
+    a["response"]["content"]["text"] =
+        json!(r#"warm light; say "hello"; C:\temp; text:literal; -draft"#);
+    let mut b = entry("https://b.test/path", 503, 0, 0.0);
+    b["response"]["content"]["text"] = json!("light is warm");
+    let c = capture(vec![a, b]);
+    for (query, expected) in [
+        ("text:warm text:light", vec![0, 1]),
+        (r#"text:"warm light""#, vec![0]),
+        (r#"text:"warm light" -503"#, vec![0]),
+        (r#"-text:"warm light""#, vec![1]),
+        (r#"text:"say \"hello\"""#, vec![0]),
+        (r#"text:"C:\\temp""#, vec![0]),
+        (r"text:C:\temp", vec![0]),
+        ("text:text:literal", vec![0]),
+        ("text:-draft", vec![0]),
+        ("error:code", vec![0]), // Unknown prefixes and URL colons are literal.
+        ("https://a.test:8443", vec![0]),
+        ("GET 503", vec![1]),
+        ("\t text:warm   -503 \n", vec![0]),
+        (r#"text:"warm light"#, vec![0]), // Open quotes consume the remaining input.
+        ("text:", vec![0, 1]),            // Empty terms are ignored while typing.
+        ("-response:", vec![0, 1]),
+        (r#"text:"" """#, vec![0, 1]),
+        ("  \t\n", vec![0, 1]),
+        ("-", vec![]),              // A lone minus remains literal.
+        (r#""text:warm""#, vec![]), // Quoting a whole token disables its prefix.
+    ] {
+        let f = Filter {
+            query: query.into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            c.filtered(&f, SortColumn::Start, false),
+            expected,
+            "{query}"
+        );
+    }
+}
+
+#[test]
+fn fulltext_search_uses_complete_decoded_bodies_not_preview_or_base64_data() {
+    let bodies = [
+        json!({"text":"Äpfel marker"}),
+        json!({"encoding":"base64","text":"w4RwZmVsIG1hcmtlcg=="}),
+        json!({"encoding":"base64","text":"%%% marker"}),
+        json!({"encoding":"base64","text":"/w=="}),
+        json!({"encoding":"base64","text":"bWFya2VyAA=="}),
+        json!({"encoding":"gzip","text":"marker"}),
+        json!({"text":42}),
+        json!({}),
+        json!({"text":format!("{}{}tail-marker", "line\n".repeat(5100), "x".repeat(2100))}),
+        json!({"text":"{\"compact\":true}"}),
+    ];
+    for (side, field) in [("request", "postData"), ("response", "content")] {
+        let c = capture(
+            bodies
+                .iter()
+                .map(|body| {
+                    let mut e = entry("https://a.test/", 200, 0, 0.0);
+                    e[side][field] = body.clone();
+                    e
+                })
+                .collect(),
+        );
+        for (query, expected) in [
+            ("text:äpfel", vec![0, 1]),
+            ("text:marker", vec![0, 1, 8]),
+            ("text:base64", vec![1, 2, 3, 4]), // Encoding metadata stays searchable.
+            ("text:gzip", vec![5]),
+            ("text:w4rwzmvs", vec![]),
+            ("text:bwfya2vy", vec![]),
+            ("text:binary", vec![]), // Decoder errors are not captured content.
+            ("text:tail-marker", vec![8]),
+            (r#"text:"{\"compact\":true}""#, vec![9]),
+        ] {
+            let f = Filter {
+                query: query.into(),
+                ..Default::default()
+            };
+            assert_eq!(
+                c.filtered(&f, SortColumn::Start, false),
+                expected,
+                "{side} {query}"
+            );
+        }
+    }
+    let c = capture(vec![json!({}), json!({"request":42,"response":null})]);
+    let f = Filter {
+        query: "text:marker".into(),
+        ..Default::default()
+    };
+    assert!(c.filtered(&f, SortColumn::Start, false).is_empty());
+}
+
+#[test]
 fn size_unknown_zero_fallback_and_stable_sort() {
     let mut fallback = entry("https://a.test", 200, -1, 1.0);
     fallback["response"]["bodySize"] = json!(7);

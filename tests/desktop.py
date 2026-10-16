@@ -216,9 +216,9 @@ with (
                     return value
                 time.sleep(0.1)
 
-        def selected_url():
+        def selected_url(expected=None):
             key("ctrl+shift+c")
-            return clipboard()
+            return clipboard(expected)
 
         def click_histogram(index, full_width=False):
             # 230 px sidebar, 12 px chart insets, optional 480 px inspector.
@@ -257,14 +257,21 @@ with (
             for index, entry in enumerate(expected):
                 if index:
                     key("Down")
-                assert selected_url() == entry["request"]["url"], (
-                    f"Visible request {index} differs"
+                actual = selected_url(entry["request"]["url"])
+                assert actual == entry["request"]["url"], (
+                    f"Visible request {index}: expected {entry['request']['url']}, got {actual}"
                 )
             key("Down")
             assert selected_url() == expected[-1]["request"]["url"], (
                 "Navigation must stop at the last visible request"
             )
             key("Up", repeat=len(expected))
+            assert (
+                selected_url(expected[0]["request"]["url"])
+                == expected[0]["request"]["url"]
+            ), (
+                "Navigation must return to the first visible request before the next interaction"
+            )
 
         def search(text):
             key("ctrl+f")
@@ -363,6 +370,34 @@ with (
         screenshot("empty-filter")
         search("")
 
+        # Fulltext finds bodies absent from the URL and preserves native navigation.
+        click(836, 56)  # Search help; pointer passes across the input.
+        time.sleep(1)
+        screenshot("search-help")
+        click(400, 56)
+        search('response:"Amber reading lamp"')
+        assert_visible([original[5], original[15]])
+        click(1163, 158)  # Response
+        click(1237, 192)  # Copy content from the selected fulltext result.
+        assert "Amber reading lamp" in clipboard()
+        screenshot("fulltext-response")
+        search("POST request:SPRING-DEMO response:coupon_expired")
+        assert_visible([original[24]])
+        click(1080, 158)  # Payload
+        click(1237, 192)
+        assert json.loads(clipboard()) == {"code": "SPRING-DEMO"}
+        screenshot("fulltext-request")
+        search("text:coupon -response:coupon_expired")
+        assert_visible([])
+        screenshot("fulltext-excluded")
+        search("text:coupon")
+        click(90, 170)  # 2xx excludes the 422 fulltext match.
+        assert_visible([])
+        click(90, 134)  # Uncheck the promoted 2xx facet; query remains active.
+        assert_visible([original[24]])
+        search("")
+        click(990, 158)  # Restore Headers for the existing smoke checks.
+
         # Independent facets combine AND (within-facet OR is covered in har.rs).
         click(90, 170)
         click(90, 434)
@@ -382,6 +417,8 @@ with (
         assert_visible(original)
 
         click(90, 278)  # Check 5xx from the restored Status order.
+        # Wait for the filtered result before targeting a row moved by the render.
+        assert_visible([e for e in original if e["response"]["status"] // 100 == 5])
         click(90, 206)  # Check 2xx below the promoted 5xx and unchecked Failed.
         assert_visible(
             [e for e in original if e["response"]["status"] // 100 in (2, 5)]
@@ -562,7 +599,7 @@ with (
             key("ctrl+q")
             assert app.wait(timeout=10) == 0
         print(
-            "PASS: native --input launch, removed open/export shortcuts, clipboard, keyboard/input focus, search, empty state, facets, slow filter, sort cycle, histogram navigation in both views, waterfall double-click navigation, inspector tabs/copies, loading transition, resize, quit"
+            "PASS: native --input launch, removed open/export shortcuts, clipboard, keyboard/input focus, search, fulltext request/response phrases and exclusions, empty state, facets, slow filter, sort cycle, histogram navigation in both views, waterfall double-click navigation, inspector tabs/copies, loading transition, resize, quit"
         )
         if artifacts:
             print("Startup error screenshots require visual review.")
