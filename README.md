@@ -4,7 +4,7 @@
 
 # HAR Viewer
 
-A private, native HTTP archive inspector built with **Rust, GPUI and
+A native HTTP archive inspector built with **Rust, GPUI and
 [GPUI Component](https://gpui-kit.com)**, with the library's dark theme, faceted
 filters and a request inspector. This is a native application, not a browser wrapper.
 
@@ -22,14 +22,6 @@ nix run github:thekorn/har-viewer -- --sample
 spaces. File paths on the command line require `--input`; positional paths are not
 accepted. Run without arguments to start without a capture, or use `--sample` for
 the bundled fixture. `--input` and `--sample` are mutually exclusive.
-
-The repository is currently private. The `github:` shorthand needs Nix's own
-GitHub authentication while it stays private. With an existing authenticated Git
-credential helper, use this form instead (no token in the command or URL):
-
-```sh
-nix run 'git+https://github.com/thekorn/har-viewer?ref=main' -- --sample
-```
 
 Packages and development shells are provided for Linux (x86_64 and aarch64) and
 Apple Silicon macOS (aarch64). macOS uses native Cocoa windows and Metal; it does
@@ -174,10 +166,18 @@ round trips, real shell argument quoting, and navigation after filtering. The
 desktop smoke test asserts clipboard and exported data through real keyboard and
 pointer input, including sorting, facets, response inspection and file-load recovery.
 
-CI builds and checks Ubuntu Linux on x86_64 and aarch64, including Nix packages,
-the headless CLI contract, and debug and packaged desktop smoke tests. macOS
-validation is manual for now; native rendering/interaction must be checked on
-an unlocked Mac with Metal and the permissions above.
+CI builds and checks only Ubuntu 24.04 on x86_64, including Nix packages, the
+headless CLI contract, and debug and packaged desktop smoke tests. The matrix
+contains one runner; aarch64 packages remain available but are not built in CI.
+macOS validation is manual for now; native rendering/interaction must be checked
+on an unlocked Mac with Metal and the permissions above.
+
+CI caches the Nix store and Cargo dependencies (including coverage build artifacts)
+separately. Keys track the pinned toolchain and dependency/build configuration,
+not each source commit. Pull requests restore caches; only successful pushes to
+`main` save them. Nix garbage collection targets a 6 GiB store before saving,
+but rooted build and shell closures can exceed that target. Cache hits never skip
+checks or tests, and no additional cache service credentials are required.
 
 `libc` is locked to 0.2.186 because GPUI 0.2.2's transitive `xattr` 0.2.3 uses
 `ENOATTR`, removed in libc 0.2.190. Do not blindly update that lock entry without

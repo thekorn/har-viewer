@@ -15,7 +15,7 @@ fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.first().is_some_and(|a| a == "--help" || a == "-h") {
         println!(
-            "HAR Viewer\n\n{USAGE}\n\nPrivate native HAR inspector. Requires macOS with Metal, or a Linux X11/Wayland desktop with Vulkan.\n{0} O: open file · {0} F: search · Up/Down: navigate · {0} Q: quit",
+            "HAR Viewer\n\n{USAGE}\n\nNative HAR inspector. Requires macOS with Metal, or a Linux X11/Wayland desktop with Vulkan.\n{0} O: open file · {0} F: search · Up/Down: navigate · {0} Q: quit",
             platform::PRIMARY_LABEL
         );
         return;

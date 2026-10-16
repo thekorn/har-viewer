@@ -84,7 +84,7 @@ rustPlatform.buildRustPackage {
       --run 'if [ "''${HAR_VIEWER_SOFTWARE:-0}" = 1 ]; then export VK_DRIVER_FILES="${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.parsed.cpu.name}.json"; fi'
   '';
   meta = {
-    description = "Private native HTTP archive inspector";
+    description = "Native HTTP archive inspector";
     homepage = "https://github.com/thekorn/har-viewer";
     license = lib.licenses.mit;
     mainProgram = "har-viewer";
