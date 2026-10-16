@@ -360,6 +360,22 @@ with (
         ]
         assert_visible(expected)
         screenshot("filtered")
+
+        # Checked facets move to the first row of their own group, and the
+        # moved row still toggles the same value rather than its old neighbor.
+        click(90, 134)  # Uncheck 2xx at the top of Status.
+        assert_visible([e for e in original if e["request"]["method"] == "POST"])
+        click(90, 326)  # Uncheck POST at the top of Method.
+        assert_visible(original)
+
+        click(90, 278)  # Check 5xx from the restored Status order.
+        click(90, 206)  # Check 2xx below the promoted 5xx and unchecked Failed.
+        assert_visible(
+            [e for e in original if e["response"]["status"] // 100 in (2, 5)]
+        )
+        screenshot("checked-facets")
+        click(90, 134)  # Checked values retain their original order: 2xx then 5xx.
+        assert_visible([e for e in original if e["response"]["status"] // 100 == 5])
         click(183, 56)  # Reset
         assert_visible(original)
 

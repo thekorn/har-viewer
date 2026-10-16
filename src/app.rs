@@ -426,14 +426,22 @@ impl Viewer {
                 };
                 *counts.entry(key).or_default() += 1;
             }
-            SidebarGroup::new(title).child(SidebarMenu::new().gap_1().children(
-                counts.into_iter().map(|(key, count)| {
+            let mut items = counts
+                .into_iter()
+                .map(|(key, count)| {
                     let active = match facet {
                         Facet::Status => s.filter.statuses.contains(&key.parse().unwrap_or(0)),
                         Facet::Method => s.filter.methods.contains(&key),
                         Facet::Kind => s.filter.kinds.contains(&key),
                         Facet::Host => s.filter.hosts.contains(&key),
                     };
+                    (key, count, active)
+                })
+                .collect::<Vec<_>>();
+            // Stable sorting keeps the original order within both groups.
+            items.sort_by_key(|(_, _, active)| !active);
+            SidebarGroup::new(title).child(SidebarMenu::new().gap_1().children(
+                items.into_iter().map(|(key, count, active)| {
                     let label = if matches!(facet, Facet::Status) {
                         match key.as_str() {
                             "0" => "Failed",
