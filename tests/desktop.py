@@ -171,9 +171,9 @@ with (
 
         pointer = [700, 400]
 
-        def click(x, y):
+        def click(x, y, clicks=1):
             if desktop:
-                return desktop.click(x, y)
+                return desktop.click(x, y, clicks)
             # Genuine pointer motion passes over neighbors; useful in recordings too.
             start = pointer[:]
             for step in range(1, 9):
@@ -185,7 +185,7 @@ with (
                 )
                 time.sleep(0.015)
             pointer[:] = [x, y]
-            run("xdotool", "click", "1")
+            run("xdotool", "click", "--repeat", str(clicks), "--delay", "100", "1")
             time.sleep(0.3)
 
         def clipboard(expected=None):
@@ -473,6 +473,40 @@ with (
         assert selected_url() == original[31]["request"]["url"], (
             "Selection survives switching from Waterfall to Requests"
         )
+
+        # Double-click must open the clicked identity, not its visible row index,
+        # including an already-selected row and clicks on the timeline itself.
+        search("/assets/")
+        click(880, 207)  # Descending duration, not capture order.
+        assets = sorted(
+            [e for e in original if "/assets/" in e["request"]["url"]],
+            key=lambda e: e["time"],
+            reverse=True,
+        )
+        key("Escape")
+        key("Up", repeat=len(original))  # Reveal the first row after sorting.
+        click(1382, 158)  # Preserve the Raw inspector tab across navigation.
+        click(1416, 56)  # Double-click must also reopen a closed inspector.
+        click(135, 16)
+        click(350, 317)
+        assert selected_url() == assets[1]["request"]["url"]
+        screenshot("waterfall-single-click")
+        for name, x, y, entry in [
+            ("name", 350, 317, assets[1]),
+            ("timeline", 800, 277, assets[0]),
+        ]:
+            click(x, y, clicks=2)
+            click(1237, 192)  # Copy content exists only in the Requests inspector.
+            assert json.loads(clipboard()) == entry, (
+                "Waterfall double-click opens the same request and inspector"
+            )
+            assert selected_url() == entry["request"]["url"]
+            screenshot(f"waterfall-double-click-{name}")
+            if name == "name":
+                click(135, 16)
+        assert_visible(assets)  # Switching views preserves filtering and sorting.
+        click(880, 207)  # Ascending duration.
+        click(880, 207)  # Restore capture order for the remaining checks.
         search("checkout.js")
         click_histogram(46)
         assert selected_url() == original[32]["request"]["url"], (
@@ -528,7 +562,7 @@ with (
             key("ctrl+q")
             assert app.wait(timeout=10) == 0
         print(
-            "PASS: native --input launch, removed open/export shortcuts, clipboard, keyboard/input focus, search, empty state, facets, slow filter, sort cycle, histogram navigation in both views, inspector tabs/copies, loading transition, resize, quit"
+            "PASS: native --input launch, removed open/export shortcuts, clipboard, keyboard/input focus, search, empty state, facets, slow filter, sort cycle, histogram navigation in both views, waterfall double-click navigation, inspector tabs/copies, loading transition, resize, quit"
         )
         if artifacts:
             print("Startup error screenshots require visual review.")

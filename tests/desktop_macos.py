@@ -213,7 +213,7 @@ class MacDesktop:
     def type_text(self, text):
         self.script(f"keystroke {json.dumps(text, ensure_ascii=False)}")
 
-    def click(self, x, y):
+    def click(self, x, y, clicks=1):
         self.prepare_copy()
         left, top, _, _ = self.geometry()
         self.script("return name")  # Refocus only the owned process before CG input.
@@ -225,6 +225,11 @@ class MacDesktop:
         ]
         self.cg.CGEventCreateMouseEvent.restype = C.c_void_p
         self.cg.CGEventPostToPid.argtypes = [C.c_int, C.c_void_p]
+        self.cg.CGEventSetIntegerValueField.argtypes = [
+            C.c_void_p,
+            C.c_uint32,
+            C.c_int64,
+        ]
         target = (left + x, top + y)
         start = self.pointer or target
         motions = [
@@ -237,8 +242,16 @@ class MacDesktop:
             )
             for step in range(1, 9)
         ]
-        for kind, point in motions + [(1, Point(*target)), (2, Point(*target))]:
+        events = [(kind, point, 0) for kind, point in motions] + [
+            (kind, Point(*target), count)
+            for count in range(1, clicks + 1)
+            for kind in (1, 2)
+        ]
+        for kind, point, count in events:
             event = self.cg.CGEventCreateMouseEvent(None, kind, point, 0)
+            if count:
+                # kCGMouseEventClickState: AppKit passes this through as clickCount.
+                self.cg.CGEventSetIntegerValueField(event, 1, count)
             # PID-directed native events cannot click through into another app.
             self.cg.CGEventPostToPid(self.app.pid, event)
             self.cf.CFRelease(event)

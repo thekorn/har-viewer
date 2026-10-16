@@ -183,6 +183,15 @@ impl Viewer {
                     }
                     cx.notify();
                 }
+                if let TableEvent::DoubleClickedRow(_) = event
+                    && this.view == View::Waterfall
+                {
+                    // The table emits SelectRow first, preserving entry identity
+                    // through the current filters and sort order.
+                    this.set_view(View::Requests, cx);
+                    this.inspector = true;
+                    window.focus(&this.focus);
+                }
             }),
         ];
         Self {
