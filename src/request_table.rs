@@ -129,7 +129,7 @@ impl TableDelegate for Requests {
                     column
                 };
                 s.descending = sort == ColumnSort::Descending;
-                s.refresh();
+                // The viewer schedules filtering off-thread, including active fulltext.
                 cx.notify();
             }
         });

@@ -106,6 +106,10 @@ Inside quotes, `\"` and `\\` represent a literal quote and backslash; other
 backslashes stay literal. While typing, empty terms are ignored and an unclosed
 quote extends to the end of the query.
 
+Filtering runs in the background after a short typing pause. Previous results
+remain visible with “Filtering…” until the current query, facets and sort are ready;
+edits replace pending work rather than queuing a scan for every keystroke.
+
 Fulltext covers field names and values under each entry's `request` and `response`:
 URLs, headers, cookies, query/form parameters, status text, MIME types, extension
 fields and complete textual bodies, including base64-decoded UTF-8. It searches

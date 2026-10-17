@@ -23,6 +23,42 @@ pub struct HistogramBin {
     first_row: Option<usize>,
 }
 
+/// Cheap, immutable inputs for filtering off the UI thread; the capture is shared.
+pub struct RefreshRequest {
+    capture: Arc<Capture>,
+    filter: Filter,
+    sort: SortColumn,
+    descending: bool,
+}
+
+pub struct RefreshResult {
+    request: RefreshRequest,
+    visible: Vec<usize>,
+    summary: Summary,
+}
+
+impl RefreshRequest {
+    pub fn is_current(&self, session: &Session) -> bool {
+        Arc::ptr_eq(&self.capture, &session.capture)
+            && self.filter == session.filter
+            && self.sort == session.sort
+            && self.descending == session.descending
+    }
+
+    /// Run on a worker: scanning, decoding, sorting and aggregation can be expensive.
+    pub fn run(self) -> RefreshResult {
+        let visible = self
+            .capture
+            .filtered(&self.filter, self.sort, self.descending);
+        let summary = self.capture.summary(&visible);
+        RefreshResult {
+            request: self,
+            visible,
+            summary,
+        }
+    }
+}
+
 pub struct Session {
     pub capture: Arc<Capture>,
     pub filter: Filter,
@@ -31,6 +67,7 @@ pub struct Session {
     pub visible: Vec<usize>,
     pub selected: Option<usize>,
     pub summary: Summary,
+    applied: Option<RefreshRequest>,
 }
 
 impl Session {
@@ -43,19 +80,43 @@ impl Session {
             visible: Vec::new(),
             selected: None,
             summary: Summary::default(),
+            applied: None,
         };
         session.refresh();
         session
     }
 
     pub fn refresh(&mut self) {
-        self.visible = self
-            .capture
-            .filtered(&self.filter, self.sort, self.descending);
-        self.summary = self.capture.summary(&self.visible);
+        self.apply_refresh(self.refresh_request().run());
+    }
+
+    pub fn needs_refresh(&self) -> bool {
+        self.applied
+            .as_ref()
+            .is_none_or(|request| !request.is_current(self))
+    }
+
+    pub fn refresh_request(&self) -> RefreshRequest {
+        RefreshRequest {
+            capture: self.capture.clone(),
+            filter: self.filter.clone(),
+            sort: self.sort,
+            descending: self.descending,
+        }
+    }
+
+    /// Reject stale inputs, and preserve selection made while the worker was busy.
+    pub fn apply_refresh(&mut self, result: RefreshResult) -> bool {
+        if !result.request.is_current(self) {
+            return false;
+        }
+        self.applied = Some(result.request);
+        self.visible = result.visible;
+        self.summary = result.summary;
         if self.selected.is_none_or(|id| !self.visible.contains(&id)) {
             self.selected = self.visible.first().copied();
         }
+        true
     }
 
     pub fn sort_by(&mut self, column: SortColumn) {

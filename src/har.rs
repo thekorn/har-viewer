@@ -26,7 +26,7 @@ pub struct Entry {
     pub raw: Value,
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct Filter {
     /// ANDed literal terms; text:/request:/response: expand the default URL/method/status scope.
     /// Double quotes group phrases; a leading minus excludes a term. Matching ignores case.

@@ -246,16 +246,31 @@ with (
                     timeout=15,
                 )
                 key(keys)
-                assert clipboard() == sentinel
+                actual = clipboard()
+                assert actual == sentinel, f"Unexpected copy from {keys}: {actual!r}"
 
         def assert_visible(expected):
             # Inspect the visible ordering through navigation and Copy URL,
             # rather than retaining an export backdoor just for the test.
             key("Escape")
-            if not expected:
-                unchanged_clipboard("ctrl+shift+c")
-                return
-            key("Up", repeat=len(original))
+            # Filtering is asynchronous: previous rows remain usable until the
+            # newest result arrives. Retry input too, not just a stale clipboard.
+            deadline = time.monotonic() + 15
+            while True:
+                try:
+                    if not expected:
+                        unchanged_clipboard("ctrl+shift+c")
+                        return
+                    key("Up", repeat=len(original))
+                    actual = selected_url(expected[0]["request"]["url"])
+                    assert actual == expected[0]["request"]["url"], (
+                        f"First result did not become {expected[0]['request']['url']}: {actual}"
+                    )
+                    break
+                except AssertionError:
+                    if time.monotonic() >= deadline:
+                        raise
+                time.sleep(0.1)
             for index, entry in enumerate(expected):
                 if index:
                     key("Down")
@@ -453,26 +468,24 @@ with (
         click(880, 207)
         assert_visible(original)
         search("/v1/catalog?")
+        catalog = next(e for e in original if "/v1/catalog?" in e["request"]["url"])
+        assert_visible([catalog])
         click(1163, 158)  # Response
         click(1237, 192)  # Copy content
-        expected_body = next(
-            e["response"]["content"]["text"]
-            for e in original
-            if "/v1/catalog?" in e["request"]["url"]
-        )
+        expected_body = catalog["response"]["content"]["text"]
         assert json.loads(clipboard()) == json.loads(expected_body), (
             "Response copies actual body"
         )
         screenshot("response")
         click(1382, 158)  # Raw entry, not the preview/editor state.
         click(1237, 192)
-        catalog = next(e for e in original if "/v1/catalog?" in e["request"]["url"])
         assert json.loads(clipboard()) == catalog, "Raw copy preserves entry metadata"
         screenshot("raw")
         search("/v1/cart/coupon")
+        coupon = next(e for e in original if "/v1/cart/coupon" in e["request"]["url"])
+        assert_visible([coupon])
         click(1080, 158)  # Payload
         click(1237, 192)
-        coupon = next(e for e in original if "/v1/cart/coupon" in e["request"]["url"])
         assert json.loads(clipboard()) == json.loads(
             coupon["request"]["postData"]["text"]
         )
@@ -483,6 +496,9 @@ with (
         assert curl[curl.index("--request") + 1] == "POST"
         assert coupon["request"]["postData"]["text"] in curl, "cURL retains payload"
         search("https://shop.lantern.test/")
+        assert_visible(
+            [e for e in original if "https://shop.lantern.test/" in e["request"]["url"]]
+        )
         click(350, 247)  # First matching request owns the fictional response cookie.
         click(1244, 158)
         click(1237, 192)
@@ -522,8 +538,7 @@ with (
             key=lambda e: e["time"],
             reverse=True,
         )
-        key("Escape")
-        key("Up", repeat=len(original))  # Reveal the first row after sorting.
+        assert_visible(assets)  # Wait for the sorted result and reveal its first row.
         click(1382, 158)  # Preserve the Raw inspector tab across navigation.
         click(1416, 56)  # Double-click must also reopen a closed inspector.
         click(135, 16)
@@ -547,11 +562,13 @@ with (
         click(880, 207)  # Ascending duration.
         click(880, 207)  # Restore capture order for the remaining checks.
         search("checkout.js")
+        assert_visible([original[32]])
         click_histogram(46)
         assert selected_url() == original[32]["request"]["url"], (
             "Histogram selection respects filters without rescaling time"
         )
         search("")
+        assert_visible(original)
         click(135, 16)
         click_histogram(0, full_width=True)
         screenshot("waterfall")

@@ -2,7 +2,7 @@ use crate::platform::{PRIMARY_LABEL, PRIMARY_MODIFIER};
 use crate::request_table::Requests;
 use gpui::{
     App, ClipboardItem, Context, Entity, FocusHandle, Focusable, KeyBinding, ScrollStrategy,
-    Subscription, Window, actions, div, prelude::*, px, rgb,
+    Subscription, Task, Window, actions, div, prelude::*, px, rgb,
 };
 use gpui_component::{
     ActiveTheme, IconName, Sizable,
@@ -29,7 +29,7 @@ use har_viewer::{
     har::{Capture, Entry},
     session::{DomainSort, Session},
 };
-use std::{collections::BTreeMap, io::Read, path::PathBuf};
+use std::{collections::BTreeMap, io::Read, path::PathBuf, time::Duration};
 
 actions!(viewer, [Search, Next, Previous, Escape, CopyUrl, Quit]);
 
@@ -76,6 +76,8 @@ pub struct Viewer {
     table: Entity<TableState<Requests>>,
     search: Entity<InputState>,
     detail: Entity<InputState>,
+    detail_key: Option<(Option<usize>, Tab)>,
+    filter_task: Option<Task<()>>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
     view: View,
@@ -138,20 +140,22 @@ impl Viewer {
                 |this, input, event: &InputEvent, window, cx| match event {
                     InputEvent::Change => {
                         let query = input.read(cx).value().to_string();
-                        this.session.update(cx, |session, cx| {
+                        this.session.update(cx, |session, _| {
                             if let Some(s) = session {
                                 s.filter.query = query;
-                                s.refresh();
-                                cx.notify();
                             }
                         });
-                        this.scroll_top(cx);
+                        // The table and inspector still show the last result;
+                        // refresh them only when the worker publishes a new one.
+                        this.refresh_filter(cx);
+                        cx.notify();
                     }
                     InputEvent::PressEnter { .. } => window.focus(&this.focus),
                     _ => {}
                 },
             ),
             cx.observe_in(&session, window, |this, _, window, cx| {
+                this.refresh_filter(cx);
                 this.sync_table(cx);
                 this.refresh_detail(window, cx);
                 cx.notify();
@@ -200,6 +204,8 @@ impl Viewer {
             table,
             search,
             detail,
+            detail_key: None,
+            filter_task: None,
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
             view: View::Requests,
@@ -211,6 +217,75 @@ impl Viewer {
             notice: "Local only. No uploads, telemetry or replay.".into(),
             reset_search: false,
         }
+    }
+
+    fn refresh_filter(&mut self, cx: &mut Context<Self>) {
+        if self.filter_task.is_some()
+            || !self
+                .session
+                .read(cx)
+                .as_ref()
+                .is_some_and(Session::needs_refresh)
+        {
+            return;
+        }
+        // Keep one worker alive across edits. Dropping a task cannot interrupt
+        // synchronous body decoding and would allow concurrent obsolete scans.
+        self.filter_task = Some(cx.spawn(async move |this, cx| {
+            let executor = cx.background_executor().clone();
+            loop {
+                let Ok(Some(request)) = this.update(cx, |this, cx| {
+                    let request = this
+                        .session
+                        .read(cx)
+                        .as_ref()
+                        .filter(|s| s.needs_refresh())
+                        .map(Session::refresh_request);
+                    if request.is_none()
+                        && let Some(task) = this.filter_task.take()
+                    {
+                        task.detach();
+                    }
+                    request
+                }) else {
+                    return;
+                };
+                executor.timer(Duration::from_millis(150)).await;
+                let current = this.update(cx, |this, cx| {
+                    this.session
+                        .read(cx)
+                        .as_ref()
+                        .is_some_and(|s| request.is_current(s))
+                });
+                match current {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(_) => return,
+                }
+                let result = executor.spawn(async move { request.run() }).await;
+                let done = this.update(cx, |this, cx| {
+                    let applied = this.session.update(cx, |session, cx| {
+                        let applied = session.as_mut().is_some_and(|s| s.apply_refresh(result));
+                        if applied {
+                            cx.notify();
+                        }
+                        applied
+                    });
+                    if applied {
+                        if let Some(task) = this.filter_task.take() {
+                            task.detach();
+                        }
+                        this.scroll_top(cx);
+                    }
+                    applied
+                });
+                if done.unwrap_or(true) {
+                    return;
+                }
+                // Inputs changed during the scan: discard it and use the latest
+                // query, facets and sort, not a queue of intermediate keystrokes.
+            }
+        }));
     }
 
     fn sync_table(&self, cx: &mut Context<Self>) {
@@ -259,6 +334,7 @@ impl Viewer {
                 capture.warnings.len()
             )
         };
+        self.detail_key = None;
         self.session.update(cx, |session, cx| {
             *session = Some(Session::new(capture));
             cx.notify();
@@ -351,6 +427,14 @@ impl Viewer {
     }
 
     fn refresh_detail(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let key = (
+            self.session.read(cx).as_ref().and_then(|s| s.selected),
+            self.tab,
+        );
+        if self.detail_key == Some(key) {
+            return;
+        }
+        self.detail_key = Some(key);
         let text = self
             .selected(cx)
             .map(|e| detail_content(e, self.tab).unwrap_or_else(|error| error))
@@ -377,7 +461,6 @@ impl Viewer {
         self.session.update(cx, |session, cx| {
             if let Some(s) = session {
                 s.filter = Default::default();
-                s.refresh();
                 cx.notify();
             }
         });
@@ -407,7 +490,6 @@ impl Viewer {
                         }
                     }
                 }
-                s.refresh();
                 cx.notify();
             }
         });
@@ -508,7 +590,6 @@ impl Viewer {
                         this.session.update(cx, |session, cx| {
                             if let Some(s) = session {
                                 s.filter.slow_only = *checked;
-                                s.refresh();
                                 cx.notify();
                             }
                         });
@@ -618,11 +699,11 @@ impl Viewer {
                                 "Includes headers, cookies and decoded text bodies"
                             )),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .child(format!("{} requests", s.visible.len())),
-                    ),
+                    .child(div().text_xs().child(if s.needs_refresh() {
+                        "Filtering…".into()
+                    } else {
+                        format!("{} requests", s.visible.len())
+                    })),
             )
             .child(self.histogram(cx))
             .when(self.view == View::Waterfall, |d| {

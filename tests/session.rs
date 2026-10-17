@@ -47,6 +47,62 @@ fn selection_follows_visible_results_not_old_row_positions() {
 }
 
 #[test]
+fn background_refresh_rejects_stale_inputs_and_preserves_live_selection() {
+    let changes: [fn(&mut Session); 10] = [
+        |s| s.filter.query = "text:coupon".into(),
+        |s| s.filter.statuses = [4].into(),
+        |s| s.filter.methods = ["POST".into()].into(),
+        |s| s.filter.kinds = ["text".into()].into(),
+        |s| s.filter.hosts = ["shop.lantern.test".into()].into(),
+        |s| s.filter.slow_only = true,
+        |s| s.sort = SortColumn::Duration,
+        |s| s.descending = true,
+        |s| s.capture = std::sync::Arc::new(Capture::sample()),
+        |s| s.filter = Default::default(), // Reset while a scan is in flight.
+    ];
+    for change in changes {
+        let mut s = Session::new(Capture::sample());
+        assert!(!s.needs_refresh());
+        s.filter.query = "response:\"Amber reading lamp\"".into();
+        assert!(s.needs_refresh());
+        let old = s.refresh_request();
+        change(&mut s);
+        let newest = s.refresh_request().run();
+        assert!(s.apply_refresh(newest));
+        let visible = s.visible.clone();
+        let selected = s.selected;
+        let requests = s.summary.requests;
+        // Complete the old job after the newest result has already arrived.
+        assert!(!s.apply_refresh(old.run()));
+        assert_eq!(s.visible, visible);
+        assert_eq!(s.selected, selected);
+        assert_eq!(s.summary.requests, requests);
+        assert!(!s.needs_refresh());
+    }
+
+    let mut s = Session::new(Capture::sample());
+    s.filter.query = "response:\"Amber reading lamp\"".into();
+    let pending = s.refresh_request();
+    s.navigate(15); // Selection can change while the worker is busy.
+    assert!(s.apply_refresh(pending.run()));
+    assert_eq!(s.visible, [5, 15]);
+    assert_eq!(s.selected, Some(15));
+    assert_eq!(s.summary.requests, 2);
+    assert!(!s.needs_refresh());
+    s.filter.query = "text:coupon".into();
+    assert!(s.apply_refresh(s.refresh_request().run()));
+    assert_eq!(s.visible, [24]);
+    assert_eq!(s.selected, Some(24));
+    assert_eq!(s.summary.requests, 1);
+    assert_eq!(s.summary.errors, 1);
+    s.filter.query = "text:no-such-content-98765".into();
+    assert!(s.apply_refresh(s.refresh_request().run()));
+    assert!(s.visible.is_empty());
+    assert_eq!(s.selected, None);
+    assert_eq!(s.summary.requests, 0);
+}
+
+#[test]
 fn selection_and_export_respect_combined_filters_and_sort() {
     let mut s = Session::new(Capture::sample());
     s.filter.statuses.insert(5);
