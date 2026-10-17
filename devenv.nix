@@ -41,6 +41,7 @@ in
       ]
     );
   env = {
+    DEVENV_TOOLBOX = "har-viewer";
     LLVM_COV = "${pkgs.llvmPackages.llvm}/bin/llvm-cov";
     LLVM_PROFDATA = "${pkgs.llvmPackages.llvm}/bin/llvm-profdata";
     CARGO_BUILD_JOBS = "2";
