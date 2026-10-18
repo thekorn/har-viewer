@@ -1,6 +1,7 @@
 //! Component table adapter. Session remains the authority for filtering and selection.
-use crate::app::{bytes, duration, phase_color};
-use gpui::{App, Context, Entity, Pixels, Window, div, prelude::*, px, relative, rgb};
+use crate::app::{bytes, duration};
+use crate::appearance::phase_color;
+use gpui::{App, Context, Entity, Pixels, Window, div, prelude::*, px, relative};
 use gpui_component::{
     ActiveTheme, Sizable, h_flex,
     table::{Column, ColumnSort, TableDelegate, TableState},
@@ -208,7 +209,7 @@ impl TableDelegate for Requests {
                             .h_full()
                             .w(relative((phase.duration_ms / total) as f32))
                             .min_w(px(1.))
-                            .bg(rgb(phase_color(phase.name))),
+                            .bg(phase_color(phase.name, cx)),
                     );
                     position += phase.duration_ms / total;
                 }

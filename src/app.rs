@@ -1,11 +1,12 @@
+use crate::appearance::{self, phase_color};
 use crate::platform::{PRIMARY_LABEL, PRIMARY_MODIFIER};
 use crate::request_table::Requests;
 use gpui::{
     App, ClipboardItem, Context, Entity, FocusHandle, Focusable, KeyBinding, ScrollStrategy,
-    Subscription, Task, Window, actions, div, prelude::*, px, rgb,
+    Subscription, Task, Window, actions, div, prelude::*, px,
 };
 use gpui_component::{
-    ActiveTheme, IconName, Sizable,
+    ActiveTheme, IconName, Root, Sizable,
     alert::Alert,
     button::{Button, ButtonVariants},
     chart::BarChart,
@@ -31,7 +32,10 @@ use har_viewer::{
 };
 use std::{collections::BTreeMap, io::Read, path::PathBuf, time::Duration};
 
-actions!(viewer, [Search, Next, Previous, Escape, CopyUrl, Quit]);
+actions!(
+    viewer,
+    [Search, Next, Previous, Escape, CopyUrl, Settings, Quit]
+);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View {
@@ -92,6 +96,7 @@ pub struct Viewer {
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
+        KeyBinding::new(&format!("{PRIMARY_MODIFIER}-,"), Settings, Some("Viewer")),
         KeyBinding::new(&format!("{PRIMARY_MODIFIER}-f"), Search, Some("Viewer")),
         // The editor's own Find action must not shadow request search.
         KeyBinding::new(
@@ -497,10 +502,30 @@ impl Viewer {
     }
 
     fn navigation(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        TabBar::new("views")
-            .selected_index(self.view as usize)
-            .children(VIEWS.map(|(_, label)| ComponentTab::new().label(label)))
-            .on_click(cx.listener(|this, index: &usize, _, cx| this.set_view(VIEWS[*index].0, cx)))
+        h_flex()
+            .h(px(32.))
+            .flex_shrink_0()
+            .pr_2()
+            .bg(cx.theme().tab_bar)
+            .child(div().flex_1().when(self.session.read(cx).is_some(), |d| {
+                d.child(
+                    TabBar::new("views")
+                        .selected_index(self.view as usize)
+                        .children(VIEWS.map(|(_, label)| ComponentTab::new().label(label)))
+                        .on_click(cx.listener(|this, index: &usize, _, cx| {
+                            this.set_view(VIEWS[*index].0, cx)
+                        })),
+                )
+            }))
+            .child(
+                Button::new("settings")
+                    .small()
+                    .ghost()
+                    .icon(IconName::Settings)
+                    .label("Settings")
+                    .tooltip(format!("Settings · {PRIMARY_LABEL} ,"))
+                    .on_click(|_, window, cx| appearance::open_settings(window, cx)),
+            )
     }
 
     fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -718,7 +743,7 @@ impl Viewer {
                             ("Download", "receive"),
                         ]
                         .into_iter()
-                        .map(|(label, key)| div().text_color(rgb(phase_color(key))).child(label)),
+                        .map(|(label, key)| div().text_color(phase_color(key, cx)).child(label)),
                     ),
                 )
             })
@@ -890,7 +915,7 @@ impl Viewer {
             .child("Connection lifecycle")
             .children(phases.into_iter().map(|p| v_flex().gap_2()
                 .child(h_flex().justify_between().child(p.name).child(duration(p.duration_ms)))
-                .child(Progress::new().value((p.duration_ms / total * 100.) as f32).bg(rgb(phase_color(p.name))))))
+                .child(Progress::new().value((p.duration_ms / total * 100.) as f32).bg(phase_color(p.name, cx)))))
             .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Connect excludes TLS here. HAR includes TLS in connect; the phases are not double-counted."));
         div()
             .id("timings")
@@ -1044,6 +1069,7 @@ impl Viewer {
 
 impl Render for Viewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let dialogs = Root::render_dialog_layer(window, cx);
         if self.reset_search {
             self.reset_search = false;
             self.search
@@ -1075,67 +1101,79 @@ impl Render for Viewer {
             .on_action(cx.listener(Self::next))
             .on_action(cx.listener(Self::previous))
             .on_action(cx.listener(Self::escape))
-            .on_action(cx.listener(Self::copy_url));
+            .on_action(cx.listener(Self::copy_url))
+            .on_action(|_: &Settings, window, cx| appearance::open_settings(window, cx))
+            .child(self.navigation(cx));
         if self.session.read(cx).is_none() {
-            return root.child(self.startup(cx)).into_any_element();
+            return div()
+                .size_full()
+                .child(root.child(self.startup(cx)))
+                .children(dialogs)
+                .into_any_element();
         }
-        root.when_some(self.error.clone(), |d, error| {
-            d.child(
-                Alert::error("load-error", error)
-                    .banner()
-                    .text_color(cx.theme().foreground)
-                    .on_close(cx.listener(|this, _, _, cx| {
-                        this.error = None;
-                        cx.notify();
-                    })),
+        let content = root
+            .when_some(self.error.clone(), |d, error| {
+                d.child(
+                    Alert::error("load-error", error)
+                        .banner()
+                        .text_color(cx.theme().foreground)
+                        .on_close(cx.listener(|this, _, _, cx| {
+                            this.error = None;
+                            cx.notify();
+                        })),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.sidebar(cx))
+                    .when(matches!(self.view, View::Requests | View::Waterfall), |d| {
+                        d.child(self.request_table(cx)).when(
+                            self.inspector
+                                && self.selected(cx).is_some()
+                                && self.view == View::Requests,
+                            |d| d.child(self.inspector(cx)),
+                        )
+                    })
+                    .when(self.view == View::Overview, |d| d.child(self.overview(cx)))
+                    .when(self.view == View::Issues, |d| d.child(self.issues(cx))),
             )
-        })
-        .child(self.navigation(cx))
-        .child(
-            div()
-                .flex()
-                .flex_1()
-                .min_h_0()
-                .child(self.sidebar(cx))
-                .when(matches!(self.view, View::Requests | View::Waterfall), |d| {
-                    d.child(self.request_table(cx)).when(
-                        self.inspector
-                            && self.selected(cx).is_some()
-                            && self.view == View::Requests,
-                        |d| d.child(self.inspector(cx)),
-                    )
-                })
-                .when(self.view == View::Overview, |d| d.child(self.overview(cx)))
-                .when(self.view == View::Issues, |d| d.child(self.issues(cx))),
-        )
-        .child(
-            h_flex()
-                .h(px(32.))
-                .flex_shrink_0()
-                .px_4()
-                .gap_4()
-                .border_t_1()
-                .border_color(cx.theme().border)
-                .text_xs()
-                .when_some(self.session.read(cx).as_ref(), |d, s| {
-                    d.child(format!(
-                        "{} / {} requests",
-                        s.visible.len(),
-                        s.capture.entries.len()
-                    ))
-                    .child(format!("Resources {}", bytes(s.summary.bytes)))
-                    .child(format!("Finish {}", duration(s.summary.duration_ms)))
-                })
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_ellipsis()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(self.notice.clone()),
-                ),
-        )
-        .into_any_element()
+            .child(
+                h_flex()
+                    .h(px(32.))
+                    .flex_shrink_0()
+                    .px_4()
+                    .gap_4()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .text_xs()
+                    .when_some(self.session.read(cx).as_ref(), |d, s| {
+                        d.child(format!(
+                            "{} / {} requests",
+                            s.visible.len(),
+                            s.capture.entries.len()
+                        ))
+                        .child(format!("Resources {}", bytes(s.summary.bytes)))
+                        .child(format!("Finish {}", duration(s.summary.duration_ms)))
+                    })
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_ellipsis()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(self.notice.clone()),
+                    ),
+            );
+        // Dialogs are siblings of the Viewer key context, not its descendants:
+        // request shortcuts must not steal focus or change the capture behind a modal.
+        div()
+            .size_full()
+            .child(content)
+            .children(dialogs)
+            .into_any_element()
     }
 }
 
@@ -1206,16 +1244,5 @@ pub(crate) fn duration(ms: f64) -> String {
         format!("{:.2} s", ms / 1000.)
     } else {
         format!("{ms:.0} ms")
-    }
-}
-pub(crate) fn phase_color(phase: &str) -> u32 {
-    match phase {
-        "dns" => 0x8ec07c,
-        "connect" => 0xfe8019,
-        "ssl" => 0xd3869b,
-        "send" => 0xb8bb26,
-        "wait" => 0x83a598,
-        "receive" => 0xfabd2f,
-        _ => 0x928374,
     }
 }

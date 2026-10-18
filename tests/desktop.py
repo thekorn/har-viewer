@@ -100,10 +100,14 @@ with (
         original = startup_capture["log"]["entries"]
         startup_file = Path(temp) / "startup capture ü.har"
         startup_file.write_text(json.dumps(startup_capture))
+        # Never read or overwrite the desktop user's appearance preference.
+        config_home = Path(temp) / "config"
+        settings_file = config_home / "har-viewer/settings.json"
 
         def launch(*arguments):
             app = subprocess.Popen(
                 [str(Path(args.binary).resolve()), *arguments],
+                env={**os.environ, "XDG_CONFIG_HOME": str(config_home)},
                 stdout=log,
                 stderr=log,
             )
@@ -312,6 +316,25 @@ with (
                     str(artifacts / f"{name}.png"),
                 )
 
+        def assert_theme(expected):
+            if not desktop:
+                # Actual native window pixels, not just the saved preference.
+                color = run(
+                    "magick",
+                    "import",
+                    "-window",
+                    window,
+                    "-crop",
+                    "1x1+1430+880",
+                    "-depth",
+                    "8",
+                    "-format",
+                    "%[hex:p{0,0}]",
+                    "info:",
+                )
+                assert color[:6].lower() == expected, f"Theme background: {color}"
+
+        assert_theme("282828")
         assert selected_url() == original[0]["request"]["url"], (
             "--input must load the specified file, not a bundled sample"
         )
@@ -346,6 +369,65 @@ with (
                 stderr=log,
             )
             processes.append(recorder)
+
+        # Settings changes are immediate, do not reset the capture, and retain
+        # input focus after closing. Exercise both the button and shortcut.
+        search("/v1/catalog?")
+        catalog = next(e for e in original if "/v1/catalog?" in e["request"]["url"])
+        assert_visible([catalog])
+        click(1163, 158)  # Response
+        key("ctrl+f")
+        key("ctrl+comma" if not desktop else "ctrl+,")
+        screenshot("settings-dark")
+        unchanged_clipboard(
+            "ctrl+shift+c"
+        )  # Request shortcuts cannot escape the modal.
+        key("ctrl+f")
+        click(513, 255)  # Gruvbox Light
+        assert json.loads(settings_file.read_text()) == {"theme": "Gruvbox Light"}
+        screenshot("settings-light")
+        key("Escape")
+        assert_theme("fbf1c7")
+        # Escape restores the search input, not request navigation.
+        key("ctrl+a")
+        type_text("response:Amber")
+        key("Escape")
+        assert_visible([original[5], original[15]])
+        assert selected_url() == original[5]["request"]["url"]
+        click(1237, 192)
+        assert "Amber reading lamp" in clipboard()
+        screenshot("theme-light-response")
+        click(1380, 16)  # Settings button
+        click(513, 227)  # Gruvbox Dark
+        assert json.loads(settings_file.read_text()) == {"theme": "Gruvbox Dark"}
+        click(896, 334)  # Done
+        assert_theme("282828")
+        assert selected_url() == original[5]["request"]["url"]
+        click(1237, 192)
+        assert "Amber reading lamp" in clipboard(), (
+            "Theme switching retains inspector tab"
+        )
+        screenshot("theme-dark-response")
+        click(1380, 16)
+        click(513, 255)
+        key("Escape")
+        assert_theme("fbf1c7")
+        key("ctrl+comma" if not desktop else "ctrl+,")
+        key("Tab", repeat=2)  # Close, then Gruvbox Dark.
+        key("space")
+        assert json.loads(settings_file.read_text()) == {"theme": "Gruvbox Dark"}
+        key("Tab")  # Gruvbox Light.
+        key("Return")
+        assert json.loads(settings_file.read_text()) == {"theme": "Gruvbox Light"}
+        unchanged_clipboard("ctrl+shift+c")  # Enter selects, not dismisses the dialog.
+        screenshot("settings-keyboard")
+        key("Escape")
+        assert_theme("fbf1c7")
+        search("")
+        assert_visible(original)
+        click(990, 158)  # Restore Headers; remaining checks exercise Light.
+        screenshot("theme-light-requests")
+
         # Late bars reveal off-screen rows; empty windows leave selection alone.
         # The 6.8 s window contains checkout.css followed by checkout.js.
         click_histogram(46)
@@ -590,6 +672,9 @@ with (
         assert clipboard() == original[0]["request"]["url"], "Row reopens inspector"
         resize(1100, 650 if desktop else 700)
         screenshot("compact")
+        key("ctrl+comma" if not desktop else "ctrl+,")
+        screenshot("settings-compact")
+        key("Escape")
         resize(1440, 900)
         key("ctrl+q")
         assert app.wait(timeout=10) == 0
@@ -599,6 +684,7 @@ with (
         pending = Path(temp) / "loading.har"
         os.mkfifo(pending)
         app, window = launch("--input", str(pending))
+        assert_theme("fbf1c7")  # The preference survives a fresh process.
         screenshot("loading")
         with pending.open("w") as writer:
             writer.write(startup_file.read_text())
@@ -617,8 +703,37 @@ with (
             screenshot(f"{name}-after-escape")
             key("ctrl+q")
             assert app.wait(timeout=10) == 0
+
+        # Invalid preferences fall back without preventing capture loading;
+        # persistence failures must not prevent applying a theme for this session.
+        settings_file.write_text('{"theme":"unknown-theme"}')
+        app, window = launch("--input", str(startup_file))
+        assert_theme("282828")
+        assert selected_url() == original[0]["request"]["url"]
+        key("ctrl+comma" if not desktop else "ctrl+,")
+        screenshot("settings-invalid-preference")
+        key("Escape")
+        key("ctrl+q")
+        assert app.wait(timeout=10) == 0
+        settings_file.write_text("not json")
+        app, window = launch("--input", str(startup_file))
+        assert_theme("282828")
+        # Only this test-owned directory is made unwritable.
+        settings_file.parent.chmod(0o500)
+        try:
+            key("ctrl+comma" if not desktop else "ctrl+,")
+            click(513, 255)
+            screenshot("settings-save-error")
+            key("Escape")
+            assert_theme("fbf1c7")
+            assert settings_file.read_text() == "not json"
+            assert selected_url() == original[0]["request"]["url"]
+            key("ctrl+q")
+            assert app.wait(timeout=10) == 0
+        finally:
+            settings_file.parent.chmod(0o700)
         print(
-            "PASS: native --input launch, removed open/export shortcuts, clipboard, keyboard/input focus, search, fulltext request/response phrases and exclusions, empty state, facets, slow filter, sort cycle, histogram navigation in both views, waterfall double-click navigation, inspector tabs/copies, loading transition, resize, quit"
+            "PASS: native --input launch, theme switching/persistence/fallback, modal focus isolation/restoration, removed open/export shortcuts, clipboard, keyboard/input focus, search, fulltext request/response phrases and exclusions, empty state, facets, slow filter, sort cycle, histogram navigation in both views, waterfall double-click navigation, inspector tabs/copies, loading transition, resize, quit"
         )
         if artifacts:
             print("Startup error screenshots require visual review.")

@@ -5,7 +5,7 @@
 # HAR Viewer
 
 A native HTTP archive inspector built with **Rust, GPUI and
-[GPUI Component](https://gpui-kit.com)**, with a Gruvbox Dark theme, faceted
+[GPUI Component](https://gpui-kit.com)**, with Gruvbox Dark and Light themes, faceted
 filters and a request inspector. This is a native application, not a browser wrapper.
 
 ## Run with Nix
@@ -118,16 +118,34 @@ invalid-base64 and unsupported-encoding bodies are skipped, but their other fiel
 remain searchable. Entry-level timings/comments and capture metadata are outside
 these scopes. Searches run locally and never fetch missing bodies or captured URLs.
 
+### Appearance settings
+
+Open **Settings** in the top-right corner, or press **Ctrl ,** (**⌘ ,** on macOS),
+and choose **Gruvbox Dark** or **Gruvbox Light**. Changes apply immediately to the
+whole application, including the inspector and charts, without resetting your
+filters, selection or inspector tab. **Done**, **Escape** and the close button
+dismiss the dialog without undoing the change. Use **Tab** to focus a theme and
+**Space** or **Enter** to select it. Dark is the default.
+
+Only the theme name is saved, never capture data, at
+`$XDG_CONFIG_HOME/har-viewer/settings.json` when that variable is an absolute path.
+Otherwise the location is `~/.config/har-viewer/settings.json` on Linux or
+`~/Library/Application Support/har-viewer/settings.json` on macOS. Missing settings
+use Dark; invalid or unavailable preferences fall back to Dark with a warning in
+Settings. If saving fails, the chosen theme still applies for the current session
+and Settings explains that it could not be saved.
+
 ### Shortcuts
 
 Use **Command (⌘)** instead of **Ctrl** on macOS. In-app hints follow the platform.
 
 | Shortcut | Action |
 | --- | --- |
+| Ctrl , | Open Settings |
 | Ctrl F | Focus request search |
 | ↑ / ↓ | Previous / next visible request (outside text fields) |
 | Enter | Return focus from search to the request list |
-| Escape | Return focus to the request list; dismiss inspection errors, not startup errors |
+| Escape | Close Settings; otherwise return focus to the request list and dismiss inspection errors, not startup errors |
 | Ctrl Shift C | Copy selected URL |
 | Ctrl Q | Quit |
 
@@ -141,10 +159,10 @@ validation warning in Issues. Clipboard copies contain these replacements, not
 the original code units; the source file is never modified. Unpaired surrogates
 in object keys are rejected to avoid merging distinct fields. Valid surrogate
 pairs and literal backslash-u text are preserved; other malformed JSON is rejected.
-Minimum window size is 1100 × 650. Captures are in memory only; nothing restores on restart.
+Minimum window size is 1100 × 650. Captures are in memory only; only the theme restores on restart.
 This is not feature parity with the reference: comparison, replay,
 image previews, JSON trees, regex search, saved views, notes/pins, resizing panels,
-light theme, websocket tooling and initiator trees remain future work.
+websocket tooling and initiator trees remain future work.
 
 ## Development: everything in devenv
 
@@ -203,8 +221,11 @@ sizes, stable sorting, combined filters, Unicode search, base64 errors, metadata
 round trips, real shell argument quoting, and navigation after filtering. The
 desktop smoke test asserts request selection and clipboard data through real keyboard
 and pointer input, including sorting, facets, response inspection, the loading
-transition and the removed open/export shortcuts. With `--artifacts`, it also captures
-startup errors for visual review.
+transition and the removed open/export shortcuts. It also checks theme switching,
+preference persistence/fallback and modal focus, using an isolated configuration
+directory so your own settings are untouched. Linux checks the rendered theme
+background pixels. With `--artifacts`, it captures both themes, the settings dialog
+and startup errors for visual review.
 
 CI builds and checks only Ubuntu 24.04 on x86_64, including Nix packages, the
 headless CLI contract, and debug and packaged desktop smoke tests. The matrix
@@ -240,19 +261,20 @@ available, but is not exposed in the app); `src/search.rs` parses and matches se
 terms without UI dependencies; `src/session.rs` owns visible
 selection and navigation. `src/app.rs` composes library components and coordinates
 native I/O; `src/request_table.rs` adapts the session to the library's virtualized
-table. Buttons, inputs (including the read-only inspector editor), tabs, sidebar,
-alerts, histogram, progress bars and scrollbars come from GPUI Component. Only the
-HAR-specific stacked waterfall rendering remains application-owned. No network or
-filesystem operations live in the HAR model. Nix runtime libraries are shared
-between the devenv shell and distribution package.
+table. `src/appearance.rs` owns the bundled theme catalog, Settings dialog and local
+appearance preference. Buttons, inputs (including the read-only inspector editor),
+tabs, sidebar, alerts, histogram, progress bars and scrollbars come from GPUI
+Component. Only the HAR-specific stacked waterfall rendering remains
+application-owned. No network or filesystem operations live in the HAR model.
+Nix runtime libraries are shared between the devenv shell and distribution package.
 
 GPUI Component and its embedded icon assets are pinned to **0.5.1**, the last stable
 release compatible with GPUI **0.2.2**. Current GPUI Kit releases require a different
 GPUI engine; upgrading them is not a drop-in dependency update. No webview or
-remote assets are used. `assets/gruvbox-dark.json` defines the Gruvbox Dark component
-and editor colors; waterfall phases use the same palette. Table headers and alerts
-use normal foreground text for readability; fonts use the platform defaults already
-packaged by this project.
+remote assets are used. `assets/gruvbox-dark.json` and `assets/gruvbox-light.json`
+define the component and editor colors; waterfall phases use the active palette.
+Table headers and alerts use normal foreground text for readability; fonts use the
+platform defaults already packaged by this project.
 
 `assets/icon.svg` is the editable Waterfall artwork. The checked-in PNG sizes and
 macOS ICNS are generated from it, with transparent margins. Regenerate on Linux

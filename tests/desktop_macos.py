@@ -200,7 +200,15 @@ class MacDesktop:
         modifiers = [
             "command down" if p == "ctrl" else "shift down" for p in parts[:-1]
         ]
-        codes = {"Down": 125, "Up": 126, "BackSpace": 51, "Escape": 53, "Return": 36}
+        codes = {
+            "Down": 125,
+            "Up": 126,
+            "BackSpace": 51,
+            "Escape": 53,
+            "Return": 36,
+            "Tab": 48,
+            "space": 49,
+        }
         action = (
             f"key code {codes[key]}" if key in codes else f"keystroke {json.dumps(key)}"
         )

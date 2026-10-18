@@ -1,4 +1,5 @@
 mod app;
+mod appearance;
 mod platform;
 mod request_table;
 
@@ -6,7 +7,7 @@ use gpui::{
     App, Application, Bounds, Focusable, TitlebarOptions, WindowBounds, WindowOptions, prelude::*,
     px, size,
 };
-use gpui_component::{Root, Theme, ThemeConfig, ThemeMode};
+use gpui_component::Root;
 use gpui_component_assets::Assets;
 
 const USAGE: &str = "Usage: har-viewer --input <har file>";
@@ -40,14 +41,7 @@ fn main() {
     }
     Application::new().with_assets(Assets).run(move |cx: &mut App| {
         gpui_component::init(cx);
-        let gruvbox: ThemeConfig =
-            serde_json::from_str(include_str!("../assets/gruvbox-dark.json"))
-                .expect("embedded Gruvbox Dark theme must be valid");
-        Theme::global_mut(cx).dark_theme = std::rc::Rc::new(gruvbox);
-        Theme::change(ThemeMode::Dark, None, cx);
-        let theme = Theme::global_mut(cx);
-        theme.font_family = platform::UI_FONT.into();
-        theme.mono_font_family = platform::MONO_FONT.into();
+        appearance::init(cx);
         app::init(cx);
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
